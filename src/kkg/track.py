@@ -23,6 +23,13 @@ def _validate_date(value: str, field: str) -> None:
         raise ValueError(error)
 
 
+def _validate_not_future(value: str, field: str) -> None:
+    """確認類日期（實付/提交）不可晚於今天——未來的「已發生」記錄是輸入錯誤，
+    靜默接受會在讀取投影時被清空，造成同一畫面二次保存丟失原輸入。"""
+    if date.fromisoformat(value) > date.today():
+        raise ValueError(f"{field}不可晚於今天（{date.today().isoformat()}）——未來的確認紀錄屬輸入錯誤。")
+
+
 def _amount(value: float, field: str) -> Decimal:
     error = f"{field}須為有限的非負數字"
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -51,6 +58,7 @@ class Disbursement:
             raise ValueError("計劃發放金額須大於零，已發放金額不得超過計劃金額")
         if self.paid_at != "":
             _validate_date(self.paid_at, "發放日期")
+            _validate_not_future(self.paid_at, "發放日期")
         if (paid > 0) != bool(self.paid_at):
             raise ValueError("請同時填寫已發放金額和發放日期")
 
@@ -67,6 +75,7 @@ class PeriodicReport:
         _validate_date(self.due, "報告到期日")
         if self.submitted_at != "":
             _validate_date(self.submitted_at, "提交日期")
+            _validate_not_future(self.submitted_at, "提交日期")
 
 
 def _deadline_alert(label: str, due: date, today: date, warn_days: int = WARN_DAYS) -> str | None:

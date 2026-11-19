@@ -75,22 +75,15 @@ def test_disbursements_count_actual_payments_and_keep_partial_payment_overdue():
     assert "第三期" in status["alerts"][1] and "14 天後到期" in status["alerts"][1]
 
 
-def test_future_receipts_do_not_count_in_an_earlier_status_view():
-    payment = track.Disbursement("首期", "2026-11-18", 50, 50, "2026-11-21")
-    report = track.PeriodicReport("進度報告", "2026-11-18", "2026-11-21")
+def test_future_confirmations_are_rejected_at_construction():
+    """P0-11：未來日期的實付/提交確認在構造時即拒絕——舊設計（投影時靜默清空）
+    會造成同一畫面二次保存丟失原輸入，已由構造期攔截取代。"""
+    import pytest
 
-    before = track.project_status([], [report], [payment], today=TODAY)
-    after = track.project_status([], [report], [payment], today=date(2026, 11, 21))
-
-    assert before["funding"]["paid"] == 0
-    assert before["disbursements"][0]["paid_amount"] == 0
-    assert before["disbursements"][0]["paid_at"] == ""
-    assert before["periodic_reports"][0]["status"] == "overdue"
-    assert before["periodic_reports"][0]["submitted_at"] == ""
-    assert len(before["alerts"]) == 2
-    assert after["funding"]["paid"] == 50
-    assert after["periodic_reports"][0]["status"] == "submitted"
-    assert after["alerts"] == []
+    with pytest.raises(ValueError, match="不可晚於今天"):
+        track.Disbursement("首期", "2026-11-18", 50, 50, "2026-11-21")
+    with pytest.raises(ValueError, match="不可晚於今天"):
+        track.PeriodicReport("進度報告", "2026-11-18", "2026-11-21")
 
 
 def test_periodic_reports_warn_until_submitted_and_keep_legacy_notes_unconfirmed():

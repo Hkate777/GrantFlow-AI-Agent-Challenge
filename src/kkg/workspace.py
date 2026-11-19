@@ -6,11 +6,13 @@ import json
 import uuid
 from dataclasses import asdict, replace
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 from .check import check_completeness
 from .extract import cross_verify, extract_fields
 from .llm import MockLLM
+from .money import parse_hkd
 from .models import Application, Document, DocType, EvidenceSpan, Finding, FindingType, Milestone, ReviewScore, Severity
 from .pipeline import Pipeline
 from .program import Program
@@ -323,6 +325,14 @@ class Workspace:
         project_status(milestones, reports, payments)
 
         def apply(case, _batch):
+            # P0-11：撥款計劃合計不得超出核准額度（申請表單的 budget）。
+            # 分錄級的日期/金額/實付≤計劃校驗由 Disbursement/PeriodicReport 構造完成。
+            scheduled = (sum(Decimal(str(item.amount)) for item in payments) if payments
+                         else sum(Decimal(str(item.funding_release)) for item in milestones))
+            approved = parse_hkd(case["application"]["fields"].get("budget"))
+            if approved is not None and scheduled > Decimal(str(approved)):
+                raise ValueError(
+                    f"撥款計劃合計 HK${scheduled:,.0f} 超出核准額度 HK${approved:,.0f}，請調整分期金額。")
             case["project"] = project
             _event(case, "project_updated", actor,
                    f"{len(milestones)} 項里程碑、{len(payments)} 筆付款記錄及 {len(reports)} 份報告。")
