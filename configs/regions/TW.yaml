@@ -1,0 +1,19 @@
+code: TW
+name: 台灣
+languages: [zh-Hant]
+script: hant
+locale_terms:
+  软件: 軟體
+  网络: 網路
+  信息: 資訊
+  视频: 視訊
+  质量: 品質
+legal_keywords:
+  - 個人資料保護法
+  - 個資
+date_formats: ["年/月/日", "YYYY-MM-DD"]
+currency: NT$
+review_conventions:
+  - 補助計劃重視在地產業連結與學研合作
+  - 須說明個人資料蒐集與利用符合當地法規
+  - 用字採臺灣繁體習慣

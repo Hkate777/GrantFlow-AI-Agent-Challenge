@@ -1,9 +1,9 @@
-"""多格式文檔攝取：PDF / DOCX / PPTX / XLSX / CSV / 圖片(OCR 可選) / 視頻(元數據+轉寫可選)。
+"""多格式文檔攝取：PDF / DOCX / PPTX / XLSX / CSV / 圖片(OCR可選) / 視頻(元數據+轉寫可選)。
 
 設計原則：
-- 每種格式一個解析器，統一返回 Document(text=...)，解析失敗不中斷流水線，記錄 error。
-- 依賴均為可選：裝了就用，沒裝就降級為提示，保證最小環境可運行 demo。
-- 圖片/視頻走「提取器」接口，默認元數據提取；接入多模態模型後可做 OCR / 視頻轉寫。
+- 每種格式一個解析器，統一返回Document(text=...)，解析失敗不中斷流水線，記錄error。
+- 依賴均為可選：裝了就用，沒裝就降級為提示，保證最小環境可運行demo。
+- 圖片/視頻走「提取器」接口，默認元數據提取；接入多模態模型後可做OCR / 視頻轉寫。
 """
 from __future__ import annotations
 
@@ -90,13 +90,13 @@ def _read_image(p: Path) -> tuple[str, dict]:
     except ImportError:
         pass
     # OCR 留接口：接入多模態模型後在此處生成文字描述
-    return f"[圖片 {p.name}：{meta or '無法讀取元數據'}，待多模態模型/OCR 解析]", meta
+    return f"[圖片{p.name}：{meta or '無法讀取元數據'}，待多模態模型/OCR解析]", meta
 
 
 def _read_video(p: Path) -> tuple[str, dict]:
     size_mb = p.stat().st_size / 1024 / 1024
     # 視頻轉寫留接口：可接 Whisper / 多模態模型
-    return f"[視頻 {p.name}：{size_mb:.1f}MB，待轉寫模型解析]", {"size_mb": round(size_mb, 1)}
+    return f"[視頻{p.name}：{size_mb:.1f}MB，待轉寫模型解析]", {"size_mb": round(size_mb, 1)}
 
 
 def ingest_file(path: str | Path) -> Document:
@@ -121,7 +121,7 @@ def ingest_file(path: str | Path) -> Document:
         elif dt is DocType.VIDEO:
             doc.text, doc.meta = _read_video(p)
         else:
-            doc.text = f"[不支持的格式 {p.suffix}，已跳過內容解析]"
+            doc.text = f"[不支持的格式{p.suffix}，已跳過內容解析]"
     except Exception as e:  # noqa: BLE001
         log.warning("解析失敗 %s: %s", p.name, e)
         doc.error = str(e)

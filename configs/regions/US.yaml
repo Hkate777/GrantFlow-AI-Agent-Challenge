@@ -1,0 +1,14 @@
+code: US
+name: 美國
+languages: [en]
+script: latin
+locale_terms: {}
+legal_keywords:
+  - privacy
+  - data protection
+date_formats: ["MM/DD/YYYY", "YYYY-MM-DD"]
+currency: USD
+review_conventions:
+  - 以英文為申請語言
+  - 須說明資料隱私與知識產權歸屬
+  - 重視市場規模、商業模式與團隊背景

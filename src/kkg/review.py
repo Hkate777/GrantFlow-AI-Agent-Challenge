@@ -1,4 +1,4 @@
-"""評審彙總 Agent：彙總評分與評語、識別分歧、生成結果通知與後續待辦。"""
+"""評審彙總Agent：彙總評分與評語、識別分歧、生成結果通知與後續待辦。"""
 from __future__ import annotations
 
 from statistics import mean, pstdev
@@ -40,11 +40,11 @@ def aggregate(scores: list[ReviewScore], prog: Program) -> dict:
     flags: list[str] = []
     if spread >= prog.divergence_threshold:
         flags.append(
-            f"評審分歧顯著：最高 {max(weighted)} vs 最低 {min(weighted)}，"
-            f"差值 {spread:.1f} ≥ 閾值 {prog.divergence_threshold}，需安排複議討論。")
+            f"評審分歧顯著：最高{max(weighted)} vs最低{min(weighted)}，"
+            f"差值{spread:.1f} ≥ 閾值{prog.divergence_threshold}，需安排複議討論。")
     for name, st in per_crit.items():
         if st["stdev"] > st["max"] * 0.25:
-            flags.append(f"維度「{name}」評分波動大（標準差 {st['stdev']:.1f}），建議複核該維度評分依據。")
+            flags.append(f"維度「{name}」評分波動大（標準差{st['stdev']:.1f}），建議複核該維度評分依據。")
 
     return {
         "n_reviewers": len(scores),
@@ -58,7 +58,7 @@ def aggregate(scores: list[ReviewScore], prog: Program) -> dict:
 
 
 def result_notice(app_id: str, title: str, agg: dict, passed: bool) -> str:
-    head = "✅ 通過" if passed else "❌ 未通過"
+    head = "[通過] 通過" if passed else "[未通過] 未通過"
     lines = [
         f"# 評審結果通知 · {app_id}",
         "",
@@ -74,7 +74,7 @@ def result_notice(app_id: str, title: str, agg: dict, passed: bool) -> str:
 def followup_todos(app_id: str, agg: dict) -> list[str]:
     todos = [f"[{app_id}] 向申請人發送評審結果通知"]
     if agg.get("flags"):
-        todos.append(f"[{app_id}] 組織複議會議：處理評分分歧（{len(agg['flags'])} 項）")
+        todos.append(f"[{app_id}] 組織複議會議：處理評分分歧（{len(agg['flags'])}項）")
     todos += [
         f"[{app_id}] 歸檔評審資料包與審計日誌",
         f"[{app_id}] 建立項目追蹤台賬（里程碑/資助發放/定期報告）",

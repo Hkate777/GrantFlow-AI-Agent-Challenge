@@ -1,4 +1,4 @@
-"""量化基準測試：把 demo 批次的效率與檢出能力轉成可放進計劃書的數據。
+"""量化基準測試：把demo批次的效率與檢出能力轉成可放進計劃書的數據。
 
 對應計劃書「可量化成效」與評審維度「功能與用戶體驗 / 應用場景適配度」。
 輸出：output/benchmark_report.md（繁體中文）。
@@ -65,11 +65,11 @@ def main() -> None:
     out = ROOT / args.out
     out.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# GrantFlow 基準測試報告",
+        "# GrantFlow基準測試報告",
         "",
         f"- 測試日期：{time.strftime('%Y-%m-%d %H:%M:%S')}",
-        f"- 測試環境：Python {sys.version.split()[0]}，離線 MockLLM（可重現）",
-        f"- 測試規模：{len(apps)} 份申請 × {sum(len(a.docs) for a in apps)} 個附件，每份重複 {repeats} 次",
+        f"- 測試環境：Python {sys.version.split()[0]}，離線MockLLM（可重現）",
+        f"- 測試規模：{len(apps)}份申請 × {sum(len(a.docs) for a in apps)}個附件，每份重複{repeats}次",
         "",
         "## 1. 處理效率",
         "",
@@ -82,28 +82,28 @@ def main() -> None:
         "",
         f"- 單份申請平均：**{statistics.mean(per_app_ms):.2f} ms**",
         f"- 單份申請中位數：{statistics.median(per_app_ms):.2f} ms",
-        f"- 推算 100 份同類批次串行處理：**{statistics.mean(per_app_ms) * 100 / 1000:.2f} 秒**"
-        "（本機 MockLLM、不含網絡延遲；真實模型視端點而定）",
+        f"- 推算100份同類批次串行處理：**{statistics.mean(per_app_ms) * 100 / 1000:.2f}秒**"
+        "（本機MockLLM、不含網絡延遲；真實模型視端點而定）",
         "",
         "## 2. 異常檢出能力",
         "",
-        f"- 內置驗收點：{total} 項；正確檢出：{hits} 項 → **檢出率 {hits / total:.0%}**",
+        f"- 內置驗收點：{total}項；正確檢出：{hits}項 至 **檢出率{hits / total:.0%}**",
         "",
         "| 申請 | 預期檢出項 | 結果 |",
         "|---|---|---|",
     ]
     for app_id, keywords in EXPECTED.items():
         text = " ".join(f.message for f in all_findings.get(app_id, [])) + " " + batch_msgs
-        marks = "、".join(f"{'✅' if kw in text else '❌'} {kw}" for kw in keywords)
+        marks = "、".join(f"{'[通過]' if kw in text else '[未通過]'} {kw}" for kw in keywords)
         lines.append(f"| {app_id} | {marks} | |")
     lines += [
         "",
-        "## 3. 對照人工 baseline（計劃書填寫用）",
+        "## 3. 對照人工baseline（計劃書填寫用）",
         "",
         "| 指標 | 人工處理（業界估算） | GrantFlow（本機實測） |",
         "|---|---:|---:|",
-        "| 單份初審 | 約 30 分鐘 | 少於 1 秒 |",
-        "| 100 份批次 | 約 2–3 週 | 約 1 分鐘內 |",
+        "| 單份初審 | 約30分鐘 | 少於1秒 |",
+        "| 100份批次 | 約2–3週 | 約1分鐘內 |",
         "| 需人工複核項 | 全部人工逐項看 | 自動標記 |",
         "",
         "> 註：人工數字為保守估算，可作簡報對比；機器數字取自本機重複實驗，詳情見 `tests/test_pipeline.py`。",
@@ -111,7 +111,7 @@ def main() -> None:
     ]
     out.write_text("\n".join(lines), encoding="utf-8")
     print(f"基準測試報告已輸出：{out.resolve()}")
-    print(f"單份平均 {statistics.mean(per_app_ms):.2f} ms；檢出率 {hits / total:.0%}")
+    print(f"單份平均{statistics.mean(per_app_ms):.2f} ms；檢出率{hits / total:.0%}")
 
 
 if __name__ == "__main__":

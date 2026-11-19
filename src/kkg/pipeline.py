@@ -1,13 +1,13 @@
-"""Agentic Workflow 編排：把各子 Agent 串成端到端流程，全程記錄審計日誌。
+"""Agentic Workflow編排：把各子Agent串成端到端流程，全程記錄審計日誌。
 
-流程（對應場景 16 功能要求）：
-  ingest   → 收集多渠道提交資料與附件，解析多格式文檔
-  extract  → 結構化抽取關鍵信息（LLM，Mock 可離線復現）
-  check    → 完整性 / 格式 / 資格 / 利益衝突 / 預算審查
-  verify   → 跨源交叉驗證 + 跨申請查重 + 預算異常檢測
-  summarize→ 標準化摘要、一頁式簡介、評審資料包
-  review   → 彙總評分評語、識別分歧、生成結果通知與待辦
-  track    → 里程碑 / 資助發放 / 定期報告追蹤 + 預警 + 管理報告
+流程（對應場景16功能要求）：
+  ingest至 收集多渠道提交資料與附件，解析多格式文檔
+  extract至 結構化抽取關鍵信息（LLM，Mock可離線復現）
+  check至 完整性 / 格式 / 資格 / 利益衝突 / 預算審查
+  verify至 跨源交叉驗證 + 跨申請查重 + 預算異常檢測
+  summarize至 標準化摘要、一頁式簡介、評審資料包
+  review至 彙總評分評語、識別分歧、生成結果通知與待辦
+  track至 里程碑 / 資助發放 / 定期報告追蹤 + 預警 + 管理報告
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from .ingest import ingest_dir
 from .llm import LLM, get_llm
 from .models import Application, AuditTrail, Finding, Milestone, ReviewScore
 from .program import Program
+from .region import Region
 from .review import aggregate, followup_todos, result_notice
 from .summarize import reviewer_pack
 from .track import management_report
@@ -27,10 +28,11 @@ from .track import management_report
 
 class Pipeline:
     def __init__(self, program: Program, llm: LLM | None = None,
-                 pass_threshold: float = 60.0) -> None:
+                 pass_threshold: float = 60.0, region: Region | None = None) -> None:
         self.prog = program
         self.llm = llm or get_llm("auto")
         self.pass_threshold = pass_threshold
+        self.region = region
         self.audit = AuditTrail()
 
     # ---------- 階段 1：受理與審查 ----------
@@ -43,6 +45,12 @@ class Pipeline:
 
         findings = check_completeness(app, self.prog)
         findings += cross_verify(app, extracted)
+        if self.region:
+            from .check import check_region
+            findings += check_region(app, self.region)
+            extracted["_region"] = self.region.name
+            extracted["_region_conventions"] = self.region.review_conventions
+            self.audit.log("region", "applied", self.region.code)
         self.audit.log("check", "done", f"findings={len(findings)}")
         return extracted, findings
 
@@ -86,7 +94,7 @@ class Pipeline:
 
 
 def load_applications(root: str | Path) -> list[Application]:
-    """從目錄加載申請：每個子目錄 = 一份申請，含 meta.json + 任意附件。"""
+    """從目錄加載申請：每個子目錄 = 一份申請，含meta.json + 任意附件。"""
     apps: list[Application] = []
     for sub in sorted(Path(root).iterdir()):
         if not sub.is_dir():

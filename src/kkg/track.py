@@ -1,4 +1,4 @@
-"""項目追蹤 Agent：里程碑、資助發放、定期報告跟蹤 + 異常預警 + 管理報告。"""
+"""項目追蹤Agent：里程碑、資助發放、定期報告跟蹤 + 異常預警 + 管理報告。"""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
@@ -14,16 +14,16 @@ def check_milestones(ms: list[Milestone], today: date | None = None,
         try:
             due = datetime.strptime(m.due, "%Y-%m-%d").date()
         except ValueError:
-            alerts.append(f"⚠️ 里程碑「{m.name}」日期格式異常（{m.due}）")
+            alerts.append(f"[注意] 里程碑「{m.name}」日期格式異常（{m.due}）")
             continue
         if m.status == "done":
             continue
         if due < today:
             m.status = "overdue"
-            alerts.append(f"🔴 里程碑「{m.name}」已逾期 {abs((due - today).days)} 天"
-                          + (f"，關聯資助發放 HK${m.funding_release:,.0f}" if m.funding_release else ""))
+            alerts.append(f"[逾期] 里程碑「{m.name}」已逾期{abs((due - today).days)}天"
+                          + (f"，關聯資助發放HK${m.funding_release:,.0f}" if m.funding_release else ""))
         elif due - today <= timedelta(days=warn_days):
-            alerts.append(f"🟡 里程碑「{m.name}」將於 {(due - today).days} 天后到期（{m.due}）")
+            alerts.append(f"[臨近] 里程碑「{m.name}」將於{(due - today).days}天后到期（{m.due}）")
     return alerts
 
 
@@ -51,7 +51,7 @@ def management_report(app_id: str, title: str, ms: list[Milestone],
         "",
         "## 預警",
     ]
-    lines += [f"- {a}" for a in alerts] if alerts else ["- ✅ 無預警，進度正常。"]
+    lines += [f"- {a}" for a in alerts] if alerts else ["- [通過] 無預警，進度正常。"]
     lines += ["", "## 定期報告提交情況"]
     if periodic_reports:
         lines += [f"- {r}" for r in periodic_reports]

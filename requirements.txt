@@ -2,10 +2,10 @@ fastapi>=0.110
 uvicorn>=0.29
 pyyaml>=6.0
 # 以下為可選解析依賴（不安裝也能跑 demo，相應格式降級處理）：
-pypdf>=4.0          # PDF 解析
-python-docx>=1.1    # DOCX 解析
-python-pptx>=0.6.23 # PPTX 解析
-openpyxl>=3.1       # XLSX 解析
+pypdf>=4.0          # PDF解析
+python-docx>=1.1    # DOCX解析
+python-pptx>=0.6.23 # PPTX解析
+openpyxl>=3.1       # XLSX解析
 Pillow>=10.0        # 圖片元數據
 pytest>=8.0         # 測試
 opencc-python-reimplemented>=0.1.7  # 語言規範檢查（繁體）

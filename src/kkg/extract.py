@@ -1,6 +1,6 @@
-"""結構化抽取 + 跨源交叉驗證 Agent。
+"""結構化抽取 + 跨源交叉驗證Agent。
 
-- extract_fields：用 LLM 從申請書正文抽取結構化信息，與表單字段比對。
+- extract_fields：用LLM從申請書正文抽取結構化信息，與表單字段比對。
 - cross_verify：多來源（表單 / 申請書 / 財務報表 / 證明文件）交叉核對，識別矛盾與異常。
 """
 from __future__ import annotations
@@ -16,7 +16,7 @@ _NUM_RE = re.compile(r"[-+]?\d[\d,]*\.?\d*")
 
 
 def extract_fields(app: Application, llm: LLM) -> dict[str, Any]:
-    """從申請書全文抽取關鍵信息。LLM 輸出 JSON，解析失敗時降級為空。"""
+    """從申請書全文抽取關鍵信息。LLM輸出JSON，解析失敗時降級為空。"""
     corpus = "\n\n".join(f"### {d.name}\n{d.text}" for d in app.docs if d.text)[:12000]
     if not corpus:
         return {}
@@ -36,7 +36,7 @@ def extract_fields(app: Application, llm: LLM) -> dict[str, Any]:
 
 
 def cross_verify(app: Application, extracted: dict[str, Any]) -> list[Finding]:
-    """把 LLM 抽取結果與申請人自報字段交叉比對，發現矛盾。"""
+    """把LLM抽取結果與申請人自報字段交叉比對，發現矛盾。"""
     findings: list[Finding] = []
 
     def _num(v: Any) -> float | None:
@@ -52,7 +52,7 @@ def cross_verify(app: Application, extracted: dict[str, Any]) -> list[Finding]:
         if abs(form_budget - doc_budget) > max(form_budget, 1) * 0.05:
             findings.append(Finding(
                 FindingType.INCONSISTENT, Severity.ERROR,
-                f"預算前後矛盾：自報表單 {form_budget:,.0f} vs 申請書 {doc_budget:,.0f}",
+                f"預算前後矛盾：自報表單{form_budget:,.0f} vs申請書{doc_budget:,.0f}",
                 source="cross_verify.budget", needs_human=True))
 
     # 標題：自報 vs 抽取
@@ -61,7 +61,7 @@ def cross_verify(app: Application, extracted: dict[str, Any]) -> list[Finding]:
             and app.title.lower() not in ext_title.lower():
         findings.append(Finding(
             FindingType.INCONSISTENT, Severity.WARNING,
-            f"項目名稱不一致：表單「{app.title}」 vs 文書「{ext_title}」",
+            f"項目名稱不一致：表單「{app.title}」 vs文書「{ext_title}」",
             source="cross_verify.title"))
 
     # 郵箱：自報 vs 文書
@@ -69,14 +69,14 @@ def cross_verify(app: Application, extracted: dict[str, Any]) -> list[Finding]:
     if ext_email and app.email and ext_email != app.email.lower():
         findings.append(Finding(
             FindingType.INCONSISTENT, Severity.WARNING,
-            f"聯繫郵箱不一致：表單 {app.email} vs 文書 {ext_email}",
+            f"聯繫郵箱不一致：表單{app.email} vs文書{ext_email}",
             source="cross_verify.email"))
 
     return findings
 
 
 def anomaly_scan(apps: list[Application]) -> list[Finding]:
-    """跨申請異常檢測：預算離羣（超過中位數 3 倍 MAD 或均值 2.5 倍）標記人工複核。"""
+    """跨申請異常檢測：預算離羣（超過中位數3倍MAD或均值2.5倍）標記人工複核。"""
     budgets = []
     for a in apps:
         m = _NUM_RE.search(str(a.fields.get("budget", "")).replace(",", ""))
@@ -92,6 +92,6 @@ def anomaly_scan(apps: list[Application]) -> list[Finding]:
         if abs(v - med) / mad > 5:
             findings.append(Finding(
                 FindingType.ANOMALY, Severity.WARNING,
-                f"申請 {app_id} 預算 {v:,.0f} 顯著偏離批次中位數 {med:,.0f}，建議人工複核",
+                f"申請{app_id}預算{v:,.0f}顯著偏離批次中位數{med:,.0f}，建議人工複核",
                 source="anomaly_scan", needs_human=True))
     return findings

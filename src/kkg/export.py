@@ -1,6 +1,6 @@
-"""評審彙總匯出：把多份申請的審查結論與評分整合成一份 Excel 總表。
+"""評審彙總匯出：把多份申請的審查結論與評分整合成一份Excel總表。
 
-對應場景 16「自動生成標準化申請摘要、評審資料包及彙總評語與評分」，
+對應場景16「自動生成標準化申請摘要、評審資料包及彙總評語與評分」，
 亦支撐評審維度「功能和用戶體驗 / 商業價值與社會影響」。
 
 用法：
@@ -17,7 +17,7 @@ try:
     import openpyxl
     from openpyxl.styles import Alignment, Font, PatternFill
 except ImportError:
-    sys.exit("需要 openpyxl：pip install openpyxl")
+    sys.exit("需要openpyxl：pip install openpyxl")
 
 from .llm import get_llm                                   # noqa: E402
 from .models import Finding, ReviewScore                   # noqa: E402
@@ -96,7 +96,7 @@ def export_workbook(prog: Program, apps: list, findings: dict[str, list[Finding]
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="匯出評審彙總 Excel")
+    ap = argparse.ArgumentParser(description="匯出評審彙總Excel")
     ap.add_argument("--program", default="configs/program_demo.yaml")
     ap.add_argument("--apps", default="data/demo/applications")
     ap.add_argument("--reviews", default="data/demo/reviews")
@@ -124,7 +124,7 @@ def main() -> None:
                             comment=item.get("comment", "")))
 
     out = export_workbook(prog, apps, findings_all, scores, Path(args.out))
-    print(f"評審彙總 Excel 已輸出：{out.resolve()}")
+    print(f"評審彙總Excel已輸出：{out.resolve()}")
 
 
 if __name__ == "__main__":

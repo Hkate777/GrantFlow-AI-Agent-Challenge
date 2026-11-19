@@ -1,4 +1,4 @@
-"""可插拔 LLM 客户端：默認 MockLLM（離線可跑），可切換任意 OpenAI 兼容端點。"""
+"""可插拔LLM客户端：默認MockLLM（離線可跑），可切換任意OpenAI兼容端點。"""
 from __future__ import annotations
 
 import json
@@ -11,9 +11,9 @@ class LLM(Protocol):
 
 
 class MockLLM:
-    """離線確定性模型：用啓發式規則產出穩定結果，保證無 API Key 時整條流水線可復現。
+    """離線確定性模型：用啓發式規則產出穩定結果，保證無API Key時整條流水線可復現。
 
-    真實運行時替換為 OpenAILLM 即可，所有 Agent 邏輯（提示詞、輸出解析、校驗）不變。
+    真實運行時替換為OpenAILLM即可，所有Agent邏輯（提示詞、輸出解析、校驗）不變。
     """
 
     name = "mock-llm"
@@ -40,14 +40,14 @@ class MockLLM:
 
 
 class OpenAILLM:
-    """OpenAI 兼容端點（OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL）。"""
+    """OpenAI兼容端點（OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL）。"""
 
     def __init__(self) -> None:
         self.base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.key = os.environ.get("OPENAI_API_KEY", "")
         self.model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
         if not self.key:
-            raise RuntimeError("未設置 OPENAI_API_KEY，無法使用真實 LLM。可改用 --llm mock。")
+            raise RuntimeError("未設置OPENAI_API_KEY，無法使用真實LLM。可改用 --llm mock。")
         self.name = f"openai:{self.model}"
 
     def complete(self, system: str, user: str) -> str:

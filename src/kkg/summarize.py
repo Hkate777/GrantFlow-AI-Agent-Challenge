@@ -1,4 +1,4 @@
-"""摘要生成 Agent：標準化申請摘要 + 一頁式項目簡介 + 評審資料包（Reviewer Pack）。"""
+"""摘要生成Agent：標準化申請摘要 + 一頁式項目簡介 + 評審資料包（Reviewer Pack）。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -19,7 +19,7 @@ def standard_summary(app: Application, extracted: dict, findings: list[Finding])
         f"- 團隊成員：{'、'.join(app.team) if app.team else '（未填）'}",
         f"- 自報預算：{app.fields.get('budget', '（未填）')}",
         "",
-        "## 關鍵信息（AI 抽取）",
+        "## 關鍵信息（AI抽取）",
     ]
     for k, v in extracted.items():
         if k.startswith("_") or v in (None, ""):
@@ -28,16 +28,16 @@ def standard_summary(app: Application, extracted: dict, findings: list[Finding])
     lines += ["", "## 審查結論"]
     if findings:
         for f in findings:
-            flag = "🛈" if f.severity.value == "info" else ("⚠️" if f.severity.value == "warning" else "❌")
+            flag = "[提示]" if f.severity.value == "info" else ("[注意]" if f.severity.value == "warning" else "[未通過]")
             human = "（需人工複核）" if f.needs_human else ""
             lines.append(f"- {flag} [{f.finding_type.value}] {f.message}{human}")
     else:
-        lines.append("- ✅ 未發現缺失、矛盾或異常。")
+        lines.append("- [通過] 未發現缺失、矛盾或異常。")
     return "\n".join(lines)
 
 
 def one_pager(app: Application, extracted: dict, llm: LLM) -> str:
-    """一頁式項目簡介：LLM 凝練（MockLLM 為啓發式摘要）。"""
+    """一頁式項目簡介：LLM凝練（MockLLM為啓發式摘要）。"""
     corpus = "\n".join(d.text for d in app.docs if d.text)[:6000]
     brief = llm.complete(
         "Summarize this grant application in at most 300 words for reviewers. "
@@ -64,9 +64,9 @@ def reviewer_pack(app: Application, prog: Program, extracted: dict,
     (pack / "summary.md").write_text(standard_summary(app, extracted, findings), encoding="utf-8")
     (pack / "one_pager.md").write_text(one_pager(app, extracted, _NoopLLM()), encoding="utf-8")
 
-    checklist = ["# 評審核對清單", "", f"計劃：{prog.name}（截止 {prog.deadline or 'N/A'}）", "", "## 評審維度與權重"]
+    checklist = ["# 評審核對清單", "", f"計劃：{prog.name}（截止{prog.deadline or 'N/A'}）", "", "## 評審維度與權重"]
     for c in prog.criteria:
-        checklist.append(f"- [ ] {c.name}（權重 {c.weight}，滿分 {c.max_score}）：____")
+        checklist.append(f"- [ ] {c.name}（權重{c.weight}，滿分{c.max_score}）：____")
     checklist += ["", "## 資格審查",
                   "- [ ] 必填資料齊全",
                   "- [ ] 附件可正常打開",
@@ -78,7 +78,7 @@ def reviewer_pack(app: Application, prog: Program, extracted: dict,
 
 
 class _NoopLLM:
-    """佔位：一頁式簡介由外層傳入真實 LLM 時可在 pipeline 中覆蓋；這裏提供兜底。"""
+    """佔位：一頁式簡介由外層傳入真實LLM時可在pipeline中覆蓋；這裏提供兜底。"""
 
     def complete(self, system: str, user: str) -> str:
         lines = [ln.strip() for ln in user.splitlines() if ln.strip()]

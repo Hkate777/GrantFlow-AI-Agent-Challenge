@@ -1,4 +1,4 @@
-"""端到端測試：用 demo 數據驗證審查發現、批次檢查、評審彙總、追蹤預警。"""
+"""端到端測試：用demo數據驗證審查發現、批次檢查、評審彙總、追蹤預警。"""
 import json
 import sys
 from pathlib import Path
@@ -45,8 +45,8 @@ def test_batch_checks():
     _, pipe, apps = _setup()
     batch = pipe.batch_checks(apps)
     msgs = " | ".join(f.message for f in batch)
-    assert "疑似重複申請" in msgs          # app001 與 app003 重複
-    assert "顯著偏離" in msgs              # 2,000,000 預算離羣
+    assert "疑似重複申請" in msgs          # app001與app003重複
+    assert "顯著偏離" in msgs              # 2,000,000預算離羣
 
 
 def test_review_aggregation():
@@ -57,7 +57,7 @@ def test_review_aggregation():
               for d in data if d["app_id"] == "APP-2027-002"]
     agg = aggregate(scores, prog)
     assert agg["weighted_total"] is not None
-    assert any("分歧" in f for f in agg["flags"])   # 兩位評審差異 > 15 → 觸發複議
+    assert any("分歧" in f for f in agg["flags"])   # 兩位評審差異 > 15至 觸發複議
 
 
 def test_tracking_alerts():
@@ -70,3 +70,32 @@ def test_tracking_alerts():
     alerts = check_milestones(ms, today=date(2026, 6, 1))
     assert any("逾期" in a for a in alerts)
     assert ms[0].status == "overdue"
+
+
+def test_region_awareness():
+    from kkg.check import check_region
+    from kkg.region import Region
+    prog, _, apps = _setup()
+    app = apps[0]
+
+    hk = Region.load(BASE / 'configs' / 'regions' / 'HK.yaml')
+    hk_findings = check_region(app, hk)
+    assert any('個人資料' in f.message for f in hk_findings)   # 香港法規關鍵詞
+
+    cn = Region.load(BASE / 'configs' / 'regions' / 'CN.yaml')
+    cn_findings = check_region(app, cn)
+    assert any('hant' in f.message or 'hans' in f.message for f in cn_findings)  # 字形不一致提示
+
+    us = Region.load(BASE / 'configs' / 'regions' / 'US.yaml')
+    assert isinstance(check_region(app, us), list)  # 英文地區亦可執行
+
+
+def test_pipeline_region_in_extracted():
+    from kkg.region import Region
+    prog = Program.load(BASE / 'configs' / 'program_demo.yaml')
+    hk = Region.load(BASE / 'configs' / 'regions' / 'HK.yaml')
+    pipe = Pipeline(prog, llm=MockLLM(), region=hk)
+    app = load_applications(BASE / 'data' / 'demo' / 'applications')[0]
+    extracted, findings = pipe.intake(app)
+    assert extracted['_region'] == '香港'
+    assert any(f.source == 'region.legal' for f in findings)
