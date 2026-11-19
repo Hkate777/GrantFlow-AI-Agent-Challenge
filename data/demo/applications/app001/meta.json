@@ -1,0 +1,15 @@
+{
+  "app_id": "APP-2027-001",
+  "program": "HK-ACC-2027",
+  "title": "面向中小企的 AI 合规文书助手",
+  "applicant": "启明科技有限公司",
+  "email": "contact@qiming-tech.hk",
+  "team": ["陈晓峰", "李嘉颖", "王志豪"],
+  "fields": {
+    "org_type": "enterprise",
+    "contact": "陈晓峰",
+    "email": "contact@qiming-tech.hk",
+    "budget": "280000",
+    "duration_m": "12"
+  }
+}
