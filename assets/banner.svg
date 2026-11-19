@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="GrantFlow 申請評審與項目管理流程自動化 Agent">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1e3a"/>
+      <stop offset="55%" stop-color="#123a63"/>
+      <stop offset="100%" stop-color="#0f6e6e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#4fd1c5"/>
+      <stop offset="100%" stop-color="#7cc4ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="300" fill="url(#bg)"/>
+  <g opacity="0.16" fill="none" stroke="#ffffff" stroke-width="1">
+    <circle cx="1010" cy="150" r="120"/>
+    <circle cx="1010" cy="150" r="86"/>
+    <circle cx="1010" cy="150" r="52"/>
+    <path d="M0 240 Q 300 190 600 240 T 1200 240"/>
+  </g>
+  <rect x="0" y="0" width="10" height="300" fill="url(#accent)"/>
+  <text x="56" y="98" fill="#9fe3dc" font-family="'Noto Sans HK','PingFang SC','Microsoft YaHei',sans-serif" font-size="22" letter-spacing="4">「智賦香江」AI 智能體應用大賽 · 場景 16</text>
+  <text x="52" y="172" fill="#ffffff" font-family="'Noto Sans HK','PingFang SC','Microsoft YaHei',sans-serif" font-size="66" font-weight="700">GrantFlow</text>
+  <text x="56" y="218" fill="#dbeafe" font-family="'Noto Sans HK','PingFang SC','Microsoft YaHei',sans-serif" font-size="27">申請評審與項目管理流程自動化 Agent</text>
+  <text x="56" y="258" fill="#8fbfc9" font-family="'Noto Sans HK','PingFang SC','Microsoft YaHei',sans-serif" font-size="18">受理 · 審查 · 交叉驗證 · 評審彙總 · 結果通知 · 項目追蹤　|　KK_Garden</text>
+  <g font-family="'Noto Sans HK','PingFang SC','Microsoft YaHei',sans-serif" font-size="17" fill="#0b1e3a" font-weight="600">
+    <rect x="860" y="60" width="150" height="38" rx="19" fill="#4fd1c5"/>
+    <text x="935" y="85" text-anchor="middle">13 個地區</text>
+    <rect x="1022" y="60" width="130" height="38" rx="19" fill="#7cc4ff"/>
+    <text x="1087" y="85" text-anchor="middle">多模型接入</text>
+    <rect x="896" y="110" width="200" height="38" rx="19" fill="#ffffff" opacity="0.92"/>
+    <text x="996" y="135" text-anchor="middle">私隱去識別化</text>
+  </g>
+</svg>

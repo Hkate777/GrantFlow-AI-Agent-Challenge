@@ -1,9 +1,12 @@
+![GrantFlow Banner](assets/banner.svg)
+
 # GrantFlow · 申請評審與項目管理流程自動化 Agent
 
 > 「智賦香江」AI智能體應用大賽 · 指定賽道 · **場景16**（教育與文化創意賽道 · 校內行政工作流方向）
 > 參賽隊伍：**KK_Garden**（2人）
 
-GrantFlow面向大學、科技園、創投機構及創新創業支援單位，把「申請受理：資格審查：交叉驗證：評審彙總：結果通知：項目追蹤」的整條行政工作流交給智能體自動完成：
+GrantFlow面向大學、科技園、創投機構及創新創業支援單位，把「申請受理：資格審查：交叉驗證：評審彙總：結果通知：項目追蹤」的整條行政工作流交給智能體自動完成。
+核心設計是**把每個資助計劃的差異做成配置、把敏感資訊擋在本機、把審查視角切換到當地**——一套引擎適配不同計劃、不同地區、不同模型，而無需改動程式：
 
 - **多渠道受理**：各計劃申請表、附件（PDF/DOCX/PPTX/XLSX/CSV/圖片/視頻）統一攝取解析
 - **聲明式規則**：每個資助計劃的要求、格式、資格、評審準則用YAML配置，無需改代碼即可適配新計劃
@@ -13,7 +16,9 @@ GrantFlow面向大學、科技園、創投機構及創新創業支援單位，�
 - **評審彙總**：按維度權重計算加權總分，自動識別評分分歧並觸發複議建議，生成結果通知與後續待辦
 - **項目追蹤**：里程碑、資助發放、定期報告跟蹤，逾期/臨期自動預警，輸出管理報告
 - **全程可審計**：每個Agent動作寫入審計日誌，關鍵節點標記為需人工複核
-- **多地區審查**：可切換香港、台灣、中國內地、新加坡及美國，Agent按地區載入語言、法規、格式及評審慣例
+- **多地區審查**：內置13個地區（香港、台灣、內地、新加坡、美國、英國、澳洲、加拿大、阿聯酋、沙特、馬來西亞、泰國、埃及），Agent按地區載入語言字形、當地法規、貨幣格式及評審慣例；法規依據真實法律（UK GDPR、Privacy Act 1988、PIPEDA、PDPL、Law 151/2020 等）
+- **私隱與商業敏感防護**：送模型前先去識別化，電郵、電話、身份證、銀行卡、合約編號等以不可逆佔位符取代，原始值不離開本機；對外評審包、Excel總表與審計日誌均無明文敏感資訊
+- **多模型可插拔**：Mock離線可復現，亦支持 OpenAI 兼容端點、Anthropic Claude、Google Gemini；`--llm auto` 按已配置的API Key自動選擇，無密鑰時優雅降級
 
 ## 語言規範
 
@@ -51,26 +56,46 @@ python app.py
 python -m pytest tests -q
 ```
 
-接入真實大模型（可選，可改善抽取與摘要品質）：
+接入真實大模型（可選，可改善抽取與摘要品質；不配置則用離線Mock）：
 
 ```bash
-export OPENAI_API_KEY=sk-...        # 支持任意 OpenAI 兼容端點
+# OpenAI兼容端點（含DeepSeek、通義、Moonshot等）
+export OPENAI_API_KEY=sk-...
 export OPENAI_BASE_URL=https://...  # 可選
 export OPENAI_MODEL=gpt-4o-mini     # 可選
 python cli.py --llm openai
+
+# Anthropic Claude
+export ANTHROPIC_API_KEY=sk-ant-...
+python cli.py --llm anthropic
+
+# Google Gemini
+export GEMINI_API_KEY=...
+python cli.py --llm gemini
+
+# 自動：按已配置的API Key依次選擇，全部沒有則降級Mock
+python cli.py --llm auto
 ```
 
-按地區審查（Agent會載入當地語言、法規、格式及評審慣例）：
+私隱防護默認開啟。如需在本機受信任環境關閉（不建議用於真實申請）：
 
 ```bash
-python cli.py --region HK    # 香港（繁體／英文，個人資料私隱條例）
-python cli.py --region CN    # 中國內地（簡體，個人信息保護法）
-python cli.py --region US    # 美國（英文，privacy/data protection）
-python cli.py --region TW    # 台灣
-python cli.py --region SG    # 新加坡（英文，PDPA）
+# 在程式中 Pipeline(prog, privacy=False)；CLI/Web 默認開啟
 ```
 
-Web面板亦有地區下拉選單。地區配置見 `configs/regions/`，新增地區只需加入一份yaml。
+按地區審查（Agent會載入當地語言字形、法規、格式及評審慣例）：
+
+```bash
+python cli.py --region HK    # 香港（繁體／英文）
+python cli.py --region GB    # 英國（英文，UK GDPR／Data Protection Act）
+python cli.py --region AU    # 澳洲（英文，Privacy Act 1988／APP）
+python cli.py --region AE    # 阿聯酋（PDPL 2021年第45號聯邦法令）
+python cli.py --region SA    # 沙特（PDPL／SDAIA）
+python cli.py --region EG    # 埃及（Law No.151/2020）
+python cli.py --region CN    # 中國內地（簡體，個人信息保護法／數據安全法）
+```
+
+共13個地區，完整清單見 `configs/regions/`。Web面板亦有地區下拉選單；新增地區只需加入一份yaml。選地依據及法規對照見 `docs/architecture.md`。
 
 ## 架構
 
@@ -93,9 +118,11 @@ flowchart LR
 ## 目錄結構
 
 ```
+├── assets/
+│   └── banner.svg              # 倉庫封面橫幅
 ├── configs/
 │   ├── program_demo.yaml       # 示範計劃規則（聲明式配置）
-│   └── regions/                # HK/TW/CN/SG/US 地區資料
+│   └── regions/                # 13個地區資料（HK/TW/CN/SG/US/GB/AU/CA/AE/SA/MY/TH/EG）
 ├── data/demo/                  # 3 份示範申請（含異常用例）+ 評審評分
 ├── src/kkg/                    # 核心包
 │   ├── ingest.py               # 多格式文檔攝取（可選依賴、優雅降級）
@@ -105,11 +132,12 @@ flowchart LR
 │   ├── review.py               # 加權彙總 / 分歧識別 / 通知 / 待辦
 │   ├── track.py                # 里程碑 / 資助 / 預警 / 管理報告
 │   ├── pipeline.py             # Agentic Workflow 編排 + 審計
-│   ├── llm.py                  # 可插拔 LLM（Mock 離線可復現）
+│   ├── llm.py                  # 可插拔模型（Mock/OpenAI/Claude/Gemini，優雅降級）
+│   ├── privacy.py              # 私隱與商業敏感資訊去識別化 + 審計
 │   ├── program.py              # 計劃規則模型
 │   ├── models.py               # 數據模型 + 審計日誌
 │   ├── region.py               # 地區模型 + 字形檢測
-│   └── export.py               # 評審彙總 Excel 匯出（三個工作表）
+│   └── export.py               # 評審彙總 Excel 匯出（三個工作表，敏感欄位脫敏）
 ├── cli.py                      # 一鍵跑通全流程
 ├── app.py                      # FastAPI Web 面板
 ├── scripts/
@@ -142,8 +170,10 @@ python scripts/pitch_demo.py    # 一鍵生成全套決賽物料（含 8 分鐘�
 
 - 所有自動化結論附 **severity + needs_human** 標記，關鍵決策（資格淘汰、利益衝突、複議）默認人工複核
 - 審計日誌記錄每次Agent動作與依據，可追溯、可復現
-- MockLLM保證無外部調用時結果確定一致；真實LLM温度固定0.2
-- 數據僅在本機處理，不上傳第三方
+- **私隱優先**：送模型前先去識別化，原始敏感值不離開本機；映射只在記憶體，不落盤；對外評審包、Excel與審計日誌均無明文敏感資訊
+- 地區合規檢查為建議性提示，不自動判定資格，最終由人工確認適用性
+- MockLLM保證無外部調用時結果確定一致；真實模型 temperature 固定0.2
+- 接入真實模型時數據已先脫敏，降低敏感資訊外洩至第三方的風險
 
 ## 路線圖
 

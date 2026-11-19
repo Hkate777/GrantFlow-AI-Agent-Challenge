@@ -19,6 +19,7 @@ from .extract import anomaly_scan, cross_verify, extract_fields
 from .ingest import ingest_dir
 from .llm import LLM, get_llm
 from .models import Application, AuditTrail, Finding, Milestone, ReviewScore
+from .privacy import Redactor
 from .program import Program
 from .region import Region
 from .review import aggregate, followup_todos, result_notice
@@ -28,17 +29,31 @@ from .track import management_report
 
 class Pipeline:
     def __init__(self, program: Program, llm: LLM | None = None,
-                 pass_threshold: float = 60.0, region: Region | None = None) -> None:
+                 pass_threshold: float = 60.0, region: Region | None = None,
+                 privacy: bool = True) -> None:
         self.prog = program
         self.llm = llm or get_llm("auto")
         self.pass_threshold = pass_threshold
         self.region = region
+        self.privacy = privacy
+        self.redactor = Redactor() if privacy else None
         self.audit = AuditTrail()
 
     # ---------- 階段 1：受理與審查 ----------
     def intake(self, app: Application) -> tuple[dict, list[Finding]]:
         self.audit.log("intake", "start", f"{app.app_id} {app.title}")
-        extracted = extract_fields(app, self.llm)
+
+        # 私隱防護：送LLM前先去識別化，原始敏感值不離開本機；
+        # 抽取結果再於本機還原，讓後續交叉驗證邏輯不受影響。
+        if self.redactor:
+            safe_app = self.redactor.safe_view(app)
+            extracted = extract_fields(safe_app, self.llm)
+            extracted = {k: (self.redactor.restore(v) if isinstance(v, str) else v)
+                         for k, v in extracted.items()}
+            self.audit.log("privacy", "redacted", self.redactor.report.summary())
+        else:
+            extracted = extract_fields(app, self.llm)
+
         extracted["_program_name"] = self.prog.name
         extracted["_criteria_hint"] = " / ".join(c.name for c in self.prog.criteria)
         self.audit.log("extract", "fields", f"keys={list(extracted)}")
@@ -63,10 +78,22 @@ class Pipeline:
     # ---------- 階段 3：生成評審資料包 ----------
     def build_packs(self, apps: list[Application], extracts: dict[str, dict],
                     all_findings: dict[str, list[Finding]], out_dir: str | Path) -> dict[str, str]:
+        from dataclasses import replace
+        from .summarize import reviewer_pack
+
         paths = {}
         for a in apps:
-            pack = reviewer_pack(a, self.prog, extracts[a.app_id],
-                                 all_findings.get(a.app_id, []), out_dir)
+            # 對外評審資料包一律用去識別化視圖，確保郵箱/電話/身份證等不退洩
+            view = self.redactor.safe_view(a) if self.redactor else a
+            safe_findings = ([replace(f, message=self.redactor.redact(f.message),
+                                      detail=self.redactor.redact(f.detail))
+                              for f in all_findings.get(a.app_id, [])]
+                             if self.redactor else all_findings.get(a.app_id, []))
+            safe_extract = ({k: (self.redactor.redact(v) if isinstance(v, str) else v)
+                             for k, v in extracts[a.app_id].items()}
+                            if self.redactor else extracts[a.app_id])
+            pack = reviewer_pack(view, self.prog, safe_extract,
+                                 safe_findings, out_dir, llm=self.llm)
             paths[a.app_id] = str(pack)
         self.audit.log("summarize", "packs", f"n={len(paths)}")
         return paths

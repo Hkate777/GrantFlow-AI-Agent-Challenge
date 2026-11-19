@@ -29,7 +29,12 @@ HEADER_FONT = Font(bold=True, color="FFFFFF")
 
 
 def export_workbook(prog: Program, apps: list, findings: dict[str, list[Finding]],
-                    scores: dict[str, list[ReviewScore]], out: Path) -> Path:
+                    scores: dict[str, list[ReviewScore]], out: Path,
+                    redactor=None) -> Path:
+    """匯出評審總表；傳入redactor時對電郵、發現說明等敏感欄位去識別化。"""
+    def _mask(v: str) -> str:
+        return redactor.redact(str(v)) if redactor else str(v)
+
     wb = openpyxl.Workbook()
 
     # Sheet 1：申請總覽
@@ -55,7 +60,7 @@ def export_workbook(prog: Program, apps: list, findings: dict[str, list[Finding]
             suggestion = "建議入圍"
         else:
             suggestion = "待評審"
-        ws.append([a.app_id, prog.name, a.title, a.applicant, a.email,
+        ws.append([a.app_id, prog.name, _mask(a.title), _mask(a.applicant), _mask(a.email),
                    len(fd), serious, human, total if total is not None else "-", suggestion])
     ws.freeze_panes = "A2"
     for col, width in zip("ABCDEFGHIJ", [16, 28, 34, 22, 28, 10, 12, 14, 12, 20]):
@@ -69,7 +74,7 @@ def export_workbook(prog: Program, apps: list, findings: dict[str, list[Finding]
     for a in apps:
         for f in findings.get(a.app_id, []):
             ws2.append([a.app_id, f.finding_type.value, f.severity.value,
-                        f.message, f.source, "是" if f.needs_human else "否"])
+                        _mask(f.message), f.source, "是" if f.needs_human else "否"])
     ws2.freeze_panes = "A2"
     for col, width in zip("ABCDEF", [16, 16, 12, 70, 24, 14]):
         ws2.column_dimensions[col].width = width
@@ -82,9 +87,9 @@ def export_workbook(prog: Program, apps: list, findings: dict[str, list[Finding]
         c.fill, c.font = HEADER_FILL, HEADER_FONT
     for a in apps:
         for s in scores.get(a.app_id, []):
-            ws3.append([a.app_id, s.reviewer] +
+            ws3.append([a.app_id, _mask(s.reviewer)] +
                        [s.criteria.get(k, 0) for k in criteria] +
-                       [round(s.total, 2), s.comment])
+                       [round(s.total, 2), _mask(s.comment)])
     ws3.freeze_panes = "A2"
     for col in "ABCDEFGH":
         ws3.column_dimensions[col].width = 18
@@ -103,8 +108,11 @@ def main() -> None:
     ap.add_argument("--out", default="output/review_summary.xlsx")
     args = ap.parse_args()
 
+    from .privacy import Redactor
+
     prog = Program.load(args.program)
     apps = load_applications(args.apps)
+    redactor = Redactor()
     pipe = Pipeline(prog, llm=get_llm("mock"))
     findings = {}
     for a in apps:
@@ -123,7 +131,7 @@ def main() -> None:
                 ReviewScore(reviewer=item["reviewer"], criteria=item["criteria"],
                             comment=item.get("comment", "")))
 
-    out = export_workbook(prog, apps, findings_all, scores, Path(args.out))
+    out = export_workbook(prog, apps, findings_all, scores, Path(args.out), redactor=redactor)
     print(f"評審彙總Excel已輸出：{out.resolve()}")
 
 

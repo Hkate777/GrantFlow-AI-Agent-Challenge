@@ -58,7 +58,7 @@ def aggregate(scores: list[ReviewScore], prog: Program) -> dict:
 
 
 def result_notice(app_id: str, title: str, agg: dict, passed: bool) -> str:
-    head = "[通過] 通過" if passed else "[未通過] 未通過"
+    head = "通過" if passed else "未通過"
     lines = [
         f"# 評審結果通知 · {app_id}",
         "",

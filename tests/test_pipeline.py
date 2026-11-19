@@ -84,7 +84,7 @@ def test_region_awareness():
 
     cn = Region.load(BASE / 'configs' / 'regions' / 'CN.yaml')
     cn_findings = check_region(app, cn)
-    assert any('hant' in f.message or 'hans' in f.message for f in cn_findings)  # 字形不一致提示
+    assert any('繁體' in f.message or '簡體' in f.message for f in cn_findings)  # 字形不一致提示
 
     us = Region.load(BASE / 'configs' / 'regions' / 'US.yaml')
     assert isinstance(check_region(app, us), list)  # 英文地區亦可執行
@@ -122,3 +122,53 @@ def test_new_regions_legal_keywords():
         r = Region.load(BASE / 'configs' / 'regions' / f'{code}.yaml')
         findings = check_region(app, r)
         assert any(kw in f.message for f in findings), (code, kw)
+
+
+def test_privacy_redaction_before_llm():
+    """送LLM前必須已去識別化：原始電郵/電話/身份證不出現在LLM收到的文本中。"""
+    from kkg.privacy import Redactor, scan_sensitive
+    raw = ("聯絡電郵 owner@example.com，電話 91234567，"
+           "身份證 A1234567(3)，合約 CT-2026-00123，預算500000")
+    r = Redactor()
+    safe = r.redact(raw)
+    assert "owner@example.com" not in safe
+    assert "91234567" not in safe
+    assert "A1234567(3)" not in safe
+    assert "CT-2026-00123" not in safe
+    assert "[EMAIL_" in safe and "[PHONE_" in safe and "[CONTRACT_" in safe
+    # 原始值可在本機還原
+    assert r.restore(safe) == raw
+    # 報告只記類型與次數，不含原始值
+    assert r.report.mask_count >= 4
+    assert "owner@example.com" not in r.report.summary()
+    assert scan_sensitive(raw).get("email") == 1
+
+
+def test_pipeline_sends_redacted_text_to_llm():
+    """間諜LLM捕獲實際收到的文本，驗證敏感值未外洩。"""
+    from kkg.privacy import Redactor
+    from kkg.models import Application, Document, DocType
+
+    class SpyLLM:
+        name = "spy"
+        def __init__(self): self.seen = ""
+        def complete(self, system, user):
+            self.seen += user
+            return "{}"
+
+    spy = SpyLLM()
+    app = Application(
+        app_id="APP-P", program="P", title="測試",
+        applicant="張三", email="zhangsan@example.com",
+        fields={"budget": "100000", "contact": "91112222"},
+        docs=[Document(path="a.md", name="a.md", doc_type=DocType.MARKDOWN,
+                       text="申請人電郵 zhangsan@example.com，身份證 A1234567(3)，電話91112222")],
+    )
+    prog = Program.load(BASE / 'configs' / 'program_demo.yaml')
+    pipe = Pipeline(prog, llm=spy, privacy=True)
+    pipe.intake(app)
+    assert "zhangsan@example.com" not in spy.seen
+    assert "91112222" not in spy.seen
+    assert "A1234567(3)" not in spy.seen
+    # 審計日誌亦不得含原始敏感值
+    assert "zhangsan@example.com" not in pipe.audit_json()

@@ -42,7 +42,8 @@ def main() -> None:
     ap.add_argument("--apps", default="data/demo/applications")
     ap.add_argument("--reviews", default="data/demo/reviews")
     ap.add_argument("--out", default="output")
-    ap.add_argument("--llm", default="mock", choices=["mock", "openai", "auto"])
+    ap.add_argument("--llm", default="mock", choices=["mock", "auto", "openai", "anthropic", "gemini"],
+                    help="Mock/自動/OpenAI兼容/Claude/Gemini；auto按已配置的API Key自動選擇")
     ap.add_argument("--pass-threshold", type=float, default=60.0)
     ap.add_argument("--region", default="HK", help="申請地區：詳見 configs/regions/，如 GB / AU / AE / SA / MY / TH / CA / EG")
     args = ap.parse_args()

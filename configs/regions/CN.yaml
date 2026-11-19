@@ -9,8 +9,8 @@ locale_terms:
   視頻: 视频
   質素: 质量
 legal_keywords:
-  - 个人信息保护
-  - 数据安全
+  - 个人信息保护法
+  - 数据安全法
 date_formats: ["年-月-日", "YYYY-MM-DD"]
 currency: ¥
 review_conventions:

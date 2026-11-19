@@ -56,13 +56,18 @@ def one_pager(app: Application, extracted: dict, llm: LLM) -> str:
 
 
 def reviewer_pack(app: Application, prog: Program, extracted: dict,
-                  findings: list[Finding], out_dir: str | Path) -> Path:
-    """生成單個申請的評審資料包目錄：summary.md + one_pager.md + checklist.md。"""
+                  findings: list[Finding], out_dir: str | Path,
+                  llm: LLM | None = None) -> Path:
+    """生成單個申請的評審資料包目錄：summary.md + one_pager.md + checklist.md。
+
+    app應為去識別化視圖（由Pipeline傳入），確保對外文件不含原始敏感資訊。
+    llm可選：傳入時一頁式簡介使用真實模型；缺省時用本地啓發式兜底。
+    """
     pack = Path(out_dir) / app.app_id
     pack.mkdir(parents=True, exist_ok=True)
 
     (pack / "summary.md").write_text(standard_summary(app, extracted, findings), encoding="utf-8")
-    (pack / "one_pager.md").write_text(one_pager(app, extracted, _NoopLLM()), encoding="utf-8")
+    (pack / "one_pager.md").write_text(one_pager(app, extracted, llm or _NoopLLM()), encoding="utf-8")
 
     checklist = ["# 評審核對清單", "", f"計劃：{prog.name}（截止{prog.deadline or 'N/A'}）", "", "## 評審維度與權重"]
     for c in prog.criteria:

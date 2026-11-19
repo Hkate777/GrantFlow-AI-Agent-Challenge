@@ -44,6 +44,7 @@ HK_SPELLING_ALLOWED: dict[str, str] = {
     "說明": "説明",
     "用戶": "用户",
     "離群值": "離羣值",
+    "脫敏": "脱敏",
 }
 
 ROOT = Path(__file__).resolve().parent.parent

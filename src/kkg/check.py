@@ -114,30 +114,39 @@ def _to_number(v: Any) -> float | None:
         return None
 
 
+_SCRIPT_LABEL = {"hant": "繁體", "hans": "簡體", "latin": "拉丁字母"}
+
+
 def check_region(app: Application, region: Region) -> list[Finding]:
     """地區化審查：語言一致性、當地法規、用語與格式慣例。
 
-    Agent會依照申請人所選地區載入對應_config（語言、法規、格式、評審慣例），
-    對照申請內容檢查是否接軌當地要求。
+    Agent按申請人所選地區載入對應配置（語言、法規、格式、評審慣例），
+    對照申請內容給出接軌當地要求的提示。所有地區檢查均為建議性，
+    不直接判定資格——最終合規與否由人工複核，符合「人機協同」原則。
     """
     findings: list[Finding] = []
     corpus = "\n".join(d.text for d in app.docs if d.text)
-    full = (app.title + " " + " ".join(str(v) for v in app.fields.values()) + " " + corpus).lower()
+    title_blob = app.title + " " + " ".join(str(v) for v in app.fields.values())
+    full = (title_blob + " " + corpus).lower()
 
-    # 1. 語言一致性：內容字形與地區偏好是否相符
+    # 1. 語言一致性：只有含中日韓文字的內容才做字形比對，純拉丁字母地區不誤報。
     script = detect_script(corpus or app.title)
-    if script != region.script and region.languages != ["en"]:
+    if script != "latin" and script != region.script:
         findings.append(Finding(
             FindingType.FORMAT, Severity.WARNING,
-            f"地區「{region.name}」期望{region.script}字形，申請內容detected為{script}",
+            f"地區「{region.name}」期望{_SCRIPT_LABEL.get(region.script, region.script)}字形，"
+            f"申請內容為{_SCRIPT_LABEL.get(script, script)}，建議統一",
             source="region.language", needs_human=False))
 
-    # 2. 當地法規與合規必要提及
-    if region.legal_keywords:
+    # 2. 當地法規：建議性提示，列出該地區的合規框架供申請人對照，不視為硬性缺失。
+    #    純拉丁字母地區（如GB/AU/US）其法規關鍵詞本就是英文，用英文全文比對；
+    #    中文地區用中文全文比對。若未見關鍵詞，提示補充說明而非判定不合資格。
+    if region.legal_keywords and corpus:
         if not any(kw.lower() in full for kw in region.legal_keywords):
             findings.append(Finding(
-                FindingType.ELIGIBILITY, Severity.WARNING,
-                f"未見地區「{region.name}」要求的合規關鍵詞：{'、'.join(region.legal_keywords)}",
+                FindingType.ELIGIBILITY, Severity.INFO,
+                f"建議說明如何符合地區「{region.name}」的合規框架："
+                f"{'、'.join(region.legal_keywords)}（需人工確認適用性）",
                 source="region.legal", needs_human=True))
 
     # 3. 本地用語：將非本地詞彙標出並給出建議
