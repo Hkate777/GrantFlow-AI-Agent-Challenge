@@ -33,10 +33,11 @@ def _upload(client, metadata=None, files=None):
 def _save_scores(client, case):
     programs = client.get("/api/programs").json()
     criteria = next(program["criteria"] for program in programs if case["program_id"] == program["program_id"])
+    # 計劃要求 min_reviewers（預設 2）：兩位評審一致滿分，讓簽發路徑可達。
     return client.put(f"/api/cases/{case['id']}/scores", json={"revision": case["revision"], "scores": [
-        {"reviewer": "Reviewer A", "criteria": {item["name"]: item["max_score"] for item in criteria},
-         "comment": "Feasible."},
-    ]})
+        {"reviewer": f"Reviewer {letter}", "criteria": {item["name"]: item["max_score"] for item in criteria},
+         "comment": "Feasible."} for letter in ("A", "B")],
+    })
 
 
 def test_portal_replay_does_not_duplicate_or_replace_case(tmp_path):

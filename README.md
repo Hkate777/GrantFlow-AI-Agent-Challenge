@@ -154,7 +154,7 @@ flowchart LR
 
 ```bash
 python scripts/benchmark.py     # 輸出 output/benchmark_report.md（效率與檢出率）
-python -m kkg.export            # 輸出 output/review_summary.xlsx（申請總覽/發現明細/評分明細）
+python scripts/export_summary.py  # 輸出 output/review_summary.xlsx（申請總覽/發現明細/評分明細）
 python scripts/pitch_demo.py    # 一鍵生成全套決賽物料（含 8 分鐘演示腳本）
 ```
 

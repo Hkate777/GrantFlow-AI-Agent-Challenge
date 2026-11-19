@@ -245,15 +245,17 @@ def create_app(database: str | Path | None = None, configs: Path | None = None) 
     @api.get("/api/cases/{case_id}/pack")
     def pack(case_id: str):
         detail, app = workspace.get(case_id)
-        try:
-            program = workspace.program(app.program)
-        except ValueError:
-            # 計劃配置已移除：改用個案內保存的計劃快照，歷史個案仍可查閱與匯出。
+        # 計劃定義優先序：簽發時快照（版本鎖定）→ 收件時快照 → 當前配置。
+        # 避免同名計劃改版後出現「舊結果配新維度」的歷史包。
+        decision = detail["decision"] or {}
+        snapshot = decision.get("program_snapshot")
+        if snapshot is None:
             with workspace.store.transaction() as connection:
                 snapshot = workspace.store.snapshot(connection, case_id)
-            if snapshot is None:
-                raise HTTPException(422, "此個案缺少計劃快照，無法匯出評審包。")
+        if snapshot is not None:
             program = Program.from_snapshot(snapshot)
+        else:
+            program = workspace.program(app.program)
         with TemporaryDirectory(prefix="grantflow-pack-") as output:
             findings = [Finding(**{**row, "finding_type": FindingType(row["finding_type"]),
                                    "severity": Severity(row["severity"])}) for row in detail["findings"]]

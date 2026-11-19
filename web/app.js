@@ -24,6 +24,7 @@ const statuses = {
   needs_review: ["待人工覆核", "warning"],
   pending_scores: ["待評分", "info"],
   invalid_scores: ["待更正評分", "error"],
+  insufficient_reviews: ["評審人數不足", "warning"],
   pending_deliberation: ["待複議", "warning"],
   awaiting_decision: ["待批核", "info"],
   approved: ["已批核", "success"],

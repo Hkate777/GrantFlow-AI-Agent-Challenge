@@ -172,11 +172,8 @@ def _eligibility_findings(app: Application, prog: Program) -> list[Finding]:
         findings.append(Finding(FindingType.ELIGIBILITY, Severity.ERROR,
                                 f"團隊人數 {len(app.team)} 不在允許範圍 {rule.min_team}–{rule.max_team}。",
                                 source="eligibility", needs_human=True))
-    # 截止時間：目前僅核對申請自報的 submitted_at（缺陷項，將改為服務端收件時間強制）。
-    submitted = app.fields.get("submitted_at")
-    if prog.deadline and _iso_date(submitted) and submitted > prog.deadline:
-        findings.append(Finding(FindingType.ELIGIBILITY, Severity.ERROR, "申請提交日期已超過計劃截止日期。",
-                                source="deadline", needs_human=True))
+    # 截止時間以服務端收件時間強制（workspace._evaluate 用 received_at 核對）；
+    # 申請人自報的 submitted_at 僅作參考，不參與資格判定——按時到件不會被自報晚日期誤阻。
     summary = _text(" ".join([app.title, *(str(value) for value in app.fields.values())]))
     for keyword in rule.excluded_keywords:
         if _contains(summary, keyword):

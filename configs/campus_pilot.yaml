@@ -2,6 +2,7 @@ program_id: HK-CAMPUS-2027
 name: 大學校園試點資助計劃
 deadline: '2027-03-31'
 budget_cap: 200000
+min_reviewers: 2   # 可簽發所需的最低有效評審人數
 pass_threshold: 70
 divergence_threshold: 20
 required_fields:

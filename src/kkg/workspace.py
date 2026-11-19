@@ -306,6 +306,7 @@ class Workspace:
             case["decision"] = {
                 "actor": actor, "reason": reason, "outcome": outcome, "at": _now(),
                 "rule_version": program.rule_version, "assessment": assessment, "findings": findings,
+                "program_snapshot": asdict(program),  # 簽發版本鎖定：歷史包對應簽發時的規則
             }
             _event(case, "decision_signed", actor, f"{outcome} · {program.rule_version} · {reason}")
 

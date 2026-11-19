@@ -188,4 +188,4 @@ def test_program_snapshot_roundtrip():
     from dataclasses import asdict
     rebuilt = Program.from_snapshot(asdict(program))
     assert rebuilt.rule_version == program.rule_version
-    assert rebuilt.min_reviewers == 1
+    assert rebuilt.min_reviewers == program.min_reviewers

@@ -43,3 +43,5 @@ divergence_threshold: 15
 conflict_rules:
   "Prof. Chan": [ "CUHK", "香港中文大學" ]
   "Dr. Lee":    [ "NetDragon", "網龍" ]
+
+min_reviewers: 2
