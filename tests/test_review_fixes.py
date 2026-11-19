@@ -5,6 +5,7 @@
 3. 計劃配置移除後，歷史個案仍可用隨案快照匯出評審包。
 4. 個案列表支援 SQL 分頁（limit/offset + total），不帶參數保持舊形狀。
 """
+import base64
 import json
 from pathlib import Path
 
@@ -19,7 +20,10 @@ from kkg.storage import CaseStore
 
 
 def _client(path, configs=None):
-    return TestClient(app.create_app(path, configs=configs), client=("127.0.0.1", 41000))
+    # P0-06：所有 /api 需認證——測試默認以演示賬號 demo/demo 走 HTTP Basic。
+    client = TestClient(app.create_app(path, configs=configs), client=("127.0.0.1", 41000))
+    client.headers["Authorization"] = "Basic " + base64.b64encode(b"demo:demo").decode()
+    return client
 
 
 def _metadata(app_id="OVERDUE-1", program="HK-ACC-2027"):
@@ -148,6 +152,7 @@ def test_pack_export_survives_plan_removal(tmp_path):
         encoding="utf-8")
     fresh = TestClient(app.create_app(tmp_path / "cases.sqlite3", configs=config_dir),
                        client=("127.0.0.1", 41000))
+    fresh.headers["Authorization"] = "Basic " + base64.b64encode(b"demo:demo").decode()
     assert fresh.get(f"/api/cases/{case['id']}").status_code == 200
     export = fresh.get(f"/api/cases/{case['id']}/pack")
     assert export.status_code == 200

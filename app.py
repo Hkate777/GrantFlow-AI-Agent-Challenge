@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, Literal
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat
 from starlette.concurrency import run_in_threadpool
@@ -24,6 +24,7 @@ from starlette.staticfiles import StaticFiles
 BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE / "src"))
 
+from kkg.auth import AccountDisabled, AuthError, AuthStore, Forbidden, Identity
 from kkg.llm import MockLLM, get_llm
 from kkg.models import Finding, FindingType, Milestone, ReviewScore, Severity
 from kkg.pipeline import Pipeline, load_applications
@@ -62,6 +63,16 @@ class ResolutionInput(Revision):
 
 class DecisionInput(ResolutionInput):
     outcome: Literal["approved", "declined"]
+
+
+class LoginInput(Input):
+    username: str = Field(max_length=120)
+    password: str = Field(max_length=200)
+
+
+class DisableInput(Input):
+    username: str = Field(max_length=120)
+    restore: bool = False
 
 
 class MilestoneRow(Input):
@@ -143,11 +154,43 @@ def _demo_scores() -> dict[str, list[ReviewScore]]:
     return reviews
 
 
+def _auth_guard(request: Request) -> Identity:
+    """全局認證閘：放行首頁/靜態/登入端點，其餘要求已認證身份（P0-06）。"""
+    if request.url.path in {"/", "/api/auth/login"} or request.url.path.startswith("/static"):
+        return Identity("anonymous", "匿名", "anonymous")
+    auth_store: AuthStore = request.app.state.auth
+    try:
+        identity = auth_store.identity_from_header(request.headers.get("authorization"))
+    except AccountDisabled as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except AuthError as exc:
+        raise HTTPException(401, str(exc),
+                            headers={"WWW-Authenticate": 'Basic realm="GrantFlow", charset="UTF-8"'}) from exc
+    request.state.identity = identity
+    return identity
+
+
+def _require_identity(request: Request) -> Identity:
+    """寫操作與導出強制已認證身份；操作者以服務端身分為準（前端自填 actor 不作授權/審計）。"""
+    identity = getattr(request.state, "identity", None) or _auth_guard(request)
+    if identity.account_id == "anonymous":
+        raise HTTPException(401, "請先登入。",
+                            headers={"WWW-Authenticate": 'Basic realm="GrantFlow", charset="UTF-8"'})
+    return identity
+
+
 def create_app(database: str | Path | None = None, configs: Path | None = None) -> FastAPI:
     database = database or os.environ.get("GRANTFLOW_DB") or BASE / "output/grantflow.sqlite3"
+    auth_store = AuthStore(Path(database).parent / "auth.sqlite3")
+    created = auth_store.ensure_defaults(os.environ.get("GRANTFLOW_BOOTSTRAP_PASSWORD"))
+    if "admin" in created:
+        print(f"[auth] 初始管理員：admin / {created['admin']}（請立即記錄並更換口令）")
+        print(f"[auth] 演示賬號：demo / {created['demo']}（正式環境請停用）")
     workspace = Workspace(CaseStore(database), _programs(configs or BASE / "configs"))
-    api = FastAPI(title="GrantFlow", version="0.2.0", docs_url=None, redoc_url=None)
+    api = FastAPI(title="GrantFlow", version="0.2.0", docs_url=None, redoc_url=None,
+                  dependencies=[Depends(_auth_guard)])
     api.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
+    api.state.auth = auth_store  # P0-06：guard 與 auth 端點共用身份存儲
 
     @api.middleware("http")
     async def local_requests(request: Request, call_next):
@@ -179,6 +222,10 @@ def create_app(database: str | Path | None = None, configs: Path | None = None) 
     async def case_missing(_request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=404)
 
+    @api.exception_handler(Forbidden)
+    async def role_denied(_request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=403)
+
     @api.get("/", response_class=FileResponse)
     def index():
         return FileResponse(BASE / "web/index.html")
@@ -202,48 +249,51 @@ def create_app(database: str | Path | None = None, configs: Path | None = None) 
         return {"added": workspace.seed(load_applications(BASE / "data/demo/applications"), _demo_scores())}
 
     @api.post("/api/cases", status_code=201)
-    async def submit(request: Request):
+    async def submit(request: Request, identity: Identity = Depends(_require_identity)):
         metadata, files, _ = await _intake_form(request)
-        return await run_in_threadpool(workspace.submit, metadata, files, "web")
+        return await run_in_threadpool(workspace.submit, metadata, files, "web",
+                                       actor=identity.display_name)
 
     @api.post("/api/mail", status_code=201)
-    async def mail(request: Request):
+    async def mail(request: Request, identity: Identity = Depends(_require_identity)):
         async with request.form(max_files=1, max_fields=0) as form:
             upload = form.get("message")
             raw = await _uploaded_file(upload, MAX_UPLOAD_BYTES)
             if not upload.filename.casefold().endswith(".eml"):
                 raise ValueError("請選擇 .eml 郵件檔。")
         metadata, files = await run_in_threadpool(read_message, raw)
-        return await run_in_threadpool(workspace.submit, metadata, files, "email")
+        return await run_in_threadpool(workspace.submit, metadata, files, "email",
+                                       actor=identity.display_name)
 
     @api.put("/api/cases/{case_id}/materials")
-    async def amend(case_id: str, request: Request):
+    async def amend(case_id: str, request: Request, identity: Identity = Depends(_require_identity)):
         metadata, files, options = await _intake_form(request)
         raw_revision = options["revision"]
         if not isinstance(raw_revision, str) or not raw_revision.isdecimal() or len(raw_revision) > 12:
             raise ValueError("缺少有效的個案版本。")
         return await run_in_threadpool(workspace.amend, case_id, int(raw_revision),
-                                       options["actor"], metadata, files, options["removed"])
+                                       identity.display_name, metadata, files, options["removed"])
 
     @api.put("/api/cases/{case_id}/scores")
-    def score(case_id: str, data: ScoresInput):
+    def score(case_id: str, data: ScoresInput, identity: Identity = Depends(_require_identity)):
         return workspace.score(case_id, data.revision, [ReviewScore(**row.model_dump()) for row in data.scores],
-                               data.actor)
+                               identity.display_name)
 
     @api.post("/api/cases/{case_id}/resolution")
-    def resolve(case_id: str, data: ResolutionInput):
-        return workspace.resolve(case_id, data.revision, data.actor, data.reason)
+    def resolve(case_id: str, data: ResolutionInput, identity: Identity = Depends(_require_identity)):
+        return workspace.resolve(case_id, data.revision, identity.display_name, data.reason)
 
     @api.post("/api/cases/{case_id}/decision")
-    def sign(case_id: str, data: DecisionInput):
-        return workspace.sign(case_id, data.revision, data.actor, data.reason, data.outcome)
+    def sign(case_id: str, data: DecisionInput, identity: Identity = Depends(_require_identity)):
+        return workspace.sign(case_id, data.revision, identity.display_name, data.reason, data.outcome)
 
     @api.put("/api/cases/{case_id}/project")
-    def project(case_id: str, data: ProjectInput):
-        return workspace.track(case_id, data.revision, data.actor, data.model_dump(exclude={"revision", "actor"}))
+    def project(case_id: str, data: ProjectInput, identity: Identity = Depends(_require_identity)):
+        return workspace.track(case_id, data.revision, identity.display_name,
+                               data.model_dump(exclude={"revision", "actor"}))
 
     @api.get("/api/cases/{case_id}/pack")
-    def pack(case_id: str):
+    def pack(case_id: str, identity: Identity = Depends(_require_identity)):
         detail, app = workspace.get(case_id)
         # 計劃定義優先序：簽發時快照（版本鎖定）→ 收件時快照 → 當前配置。
         # 避免同名計劃改版後出現「舊結果配新維度」的歷史包。
@@ -271,7 +321,7 @@ def create_app(database: str | Path | None = None, configs: Path | None = None) 
                         headers={"Content-Disposition": 'attachment; filename="reviewer-pack.zip"'})
 
     @api.get("/api/cases/{case_id}/report", response_class=PlainTextResponse)
-    def report(case_id: str):
+    def report(case_id: str, identity: Identity = Depends(_require_identity)):
         detail, app = workspace.get(case_id)
         if detail["assessment"]["status"] != "approved":
             raise HTTPException(409, "請先簽發通過結果。")
@@ -311,6 +361,39 @@ def create_app(database: str | Path | None = None, configs: Path | None = None) 
                 "batch_findings": [{"severity": finding.severity.value, "message": finding.message}
                                    for finding in pipe.batch_checks(apps)],
                 "audit": json.loads(pipe.audit_json())}
+
+    # ---------- P0-06：身份端點 ----------
+    @api.get("/api/auth/me")
+    def me(identity: Identity = Depends(_require_identity)):
+        return {"account_id": identity.account_id, "display_name": identity.display_name, "role": identity.role}
+
+    @api.post("/api/auth/login")
+    def login(data: LoginInput):
+        try:
+            identity = auth_store.verify_login(data.username, data.password)
+        except AuthError as exc:
+            raise HTTPException(401, str(exc),
+                                headers={"WWW-Authenticate": 'Basic realm="GrantFlow", charset="UTF-8"'}) from exc
+        token = auth_store.create_session(identity)
+        return {"token": token, "account_id": identity.account_id,
+                "display_name": identity.display_name, "role": identity.role}
+
+    @api.get("/api/auth/accounts")
+    def auth_accounts(identity: Identity = Depends(_require_identity)):
+        if identity.role != "admin":
+            raise Forbidden("僅管理員可查看賬戶清單。")
+        return auth_store.list_accounts()
+
+    @api.post("/api/auth/disable")
+    def auth_disable(data: DisableInput, identity: Identity = Depends(_require_identity)):
+        if identity.role != "admin":
+            raise Forbidden("僅管理員可停用賬戶。")
+        if data.username.casefold() == identity.account_id:
+            raise ValueError("不可停用當前登入的管理員賬號。")
+        found = auth_store.set_disabled(data.username, disabled=not data.restore)
+        if not found:
+            raise MissingCase("找不到該賬號。")
+        return {"username": data.username.casefold(), "disabled": not data.restore}
 
     api.mount("/static", StaticFiles(directory=BASE / "web", check_dir=False), name="static")
     return api
