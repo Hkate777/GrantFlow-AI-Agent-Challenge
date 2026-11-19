@@ -137,23 +137,24 @@ class GeminiLLM(_HTTPLLM):
 
 
 def get_llm(kind: str = "auto") -> LLM:
-    """按kind返回模型實例；auto按環境變量自動選擇，均失敗則降級Mock。"""
-    if kind == "mock":
+    """按 kind 返回模型實例。
+
+    auto/mock 一律回本地 MockLLM：外部模型須顯式指定 kind（openai/anthropic/
+    gemini）且環境有對應密鑰——Web 預設保持本地運行，接外部模型屬受控審批項。
+    """
+    if kind in {"mock", "auto"}:
         return MockLLM()
     factories = {
         "openai": ("OPENAI_API_KEY", OpenAILLM),
         "anthropic": ("ANTHROPIC_API_KEY", AnthropicLLM),
         "gemini": ("GEMINI_API_KEY", GeminiLLM),
     }
-    order = {
-        "auto": ["anthropic", "openai", "gemini"],
-    }.get(kind, [kind])
-    for name in order:
-        env, factory = factories[name]
-        if kind != name and not os.environ.get(env):  # auto模式需有密鑰才考慮
-            continue
-        try:
-            return factory()
-        except RuntimeError:
-            continue
-    return MockLLM()
+    if kind not in factories:
+        return MockLLM()
+    env, factory = factories[kind]
+    if not os.environ.get(env):
+        return MockLLM()
+    try:
+        return factory()
+    except RuntimeError:
+        return MockLLM()

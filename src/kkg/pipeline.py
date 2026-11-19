@@ -22,7 +22,7 @@ from .models import Application, AuditTrail, Finding, Milestone, ReviewScore
 from .privacy import Redactor
 from .program import Program
 from .region import Region
-from .review import aggregate, followup_todos, result_notice
+from .review import assess, followup_todos
 from .summarize import reviewer_pack
 from .track import management_report
 
@@ -99,14 +99,14 @@ class Pipeline:
         return paths
 
     # ---------- 階段 4：評審彙總與通知 ----------
-    def review(self, app: Application, scores: list[ReviewScore]) -> dict:
-        agg = aggregate(scores, self.prog)
-        agg["notice"] = result_notice(
-            app.app_id, app.title, agg,
-            passed=(agg.get("weighted_total") or 0) >= self.pass_threshold)
+    def review(self, app: Application, scores: list[ReviewScore], *,
+               findings: list[Finding] | None = None, reviewed: bool = False) -> dict:
+        if findings is None:
+            _, findings = self.intake(app)
+        agg = assess(scores, self.prog, findings, pass_threshold=self.pass_threshold, reviewed=reviewed)
         agg["todos"] = followup_todos(app.app_id, agg)
         self.audit.log("review", "aggregated",
-                       f"{app.app_id} total={agg.get('weighted_total')}")
+                       f"{app.app_id} · {agg['status']} · total={agg['weighted_total']}")
         return agg
 
     # ---------- 階段 5：項目追蹤 ----------
@@ -120,24 +120,22 @@ class Pipeline:
         return self.audit.to_json()
 
 
-def load_applications(root: str | Path) -> list[Application]:
-    """從目錄加載申請：每個子目錄 = 一份申請，含meta.json + 任意附件。"""
+def load_applications(root: str | Path, *, errors: list[str] | None = None) -> list[Application]:
+    """從目錄加載申請：每個子目錄 = 一份申請，含meta.json + 任意附件。
+
+    與 Web 收件共用 ``submission.load_application`` 的表單/申請編號校驗；
+    壞掉的 ``meta.json`` 只記入 ``errors`` 並跳過，不中斷其餘申請。
+    """
+    from .submission import load_application  # 延遲導入，避免與 submission 循環依賴
+
     apps: list[Application] = []
+    errs = errors if errors is not None else []
     for sub in sorted(Path(root).iterdir()):
         if not sub.is_dir():
             continue
-        meta_file = sub / "meta.json"
-        meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
-        app = Application(
-            app_id=meta.get("app_id", sub.name),
-            program=meta.get("program", ""),
-            title=meta.get("title", sub.name),
-            applicant=meta.get("applicant", ""),
-            email=meta.get("email", ""),
-            team=meta.get("team", []),
-            fields=meta.get("fields", {}),
-            docs=ingest_dir(sub),
-        )
-        app.docs = [d for d in app.docs if d.name != "meta.json"]
-        apps.append(app)
+        try:
+            apps.append(load_application(sub))
+        except (ValueError, OSError, UnicodeError) as exc:
+            errs.append(f"{sub.name}: {exc}")
+            continue
     return apps
