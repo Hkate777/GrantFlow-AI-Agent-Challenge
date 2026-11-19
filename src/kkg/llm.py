@@ -1,4 +1,4 @@
-"""可插拔 LLM 客户端：默认 MockLLM（离线可跑），可切换任意 OpenAI 兼容端点。"""
+"""可插拔 LLM 客户端：默認 MockLLM（離線可跑），可切換任意 OpenAI 兼容端點。"""
 from __future__ import annotations
 
 import json
@@ -11,18 +11,18 @@ class LLM(Protocol):
 
 
 class MockLLM:
-    """离线确定性模型：用启发式规则产出稳定结果，保证无 API Key 时整条流水线可复现。
+    """離線確定性模型：用啓發式規則產出穩定結果，保證無 API Key 時整條流水線可復現。
 
-    真实运行时替换为 OpenAILLM 即可，所有 Agent 逻辑（提示词、输出解析、校验）不变。
+    真實運行時替換為 OpenAILLM 即可，所有 Agent 邏輯（提示詞、輸出解析、校驗）不變。
     """
 
     name = "mock-llm"
 
     def complete(self, system: str, user: str) -> str:
-        # 提取类调用：要求返回 JSON 时，从文本里做基于关键词的简单抽取
+        # 提取類調用：要求返回 JSON 時，從文本里做基於關鍵詞的簡單抽取
         if "return JSON" in system or "return json" in system.lower():
             return self._extract_json(user)
-        # 摘要类调用：截取前若干句
+        # 摘要類調用：截取前若干句
         lines = [ln.strip() for ln in user.splitlines() if ln.strip()]
         return " ".join(lines[:6])[:600]
 
@@ -40,14 +40,14 @@ class MockLLM:
 
 
 class OpenAILLM:
-    """OpenAI 兼容端点（OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL）。"""
+    """OpenAI 兼容端點（OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL）。"""
 
     def __init__(self) -> None:
         self.base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.key = os.environ.get("OPENAI_API_KEY", "")
         self.model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
         if not self.key:
-            raise RuntimeError("未设置 OPENAI_API_KEY，无法使用真实 LLM。可改用 --llm mock。")
+            raise RuntimeError("未設置 OPENAI_API_KEY，無法使用真實 LLM。可改用 --llm mock。")
         self.name = f"openai:{self.model}"
 
     def complete(self, system: str, user: str) -> str:

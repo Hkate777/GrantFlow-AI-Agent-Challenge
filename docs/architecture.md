@@ -1,41 +1,41 @@
-# 架构设计说明
+# 架構設計説明
 
-## 1. 设计目标
+## 1. 設計目標
 
-场景 16 的核心挑战：**各计划要求、格式、准则各异；材料结构化与非结构化混杂；需支持评审、决策与后续管理全流程**。GrantFlow 的三条设计原则：
+場景 16 的核心挑戰：**各計劃要求、格式、準則各異；材料結構化與非結構化混雜；需支持評審、決策與後續管理全流程**。GrantFlow 的三條設計原則：
 
-1. **规则外置**：计划差异收敛到 YAML 声明式配置（`configs/`），代码零改动适配新计划。
-2. **人机协同**：Agent 只做「检查与建议」，淘汰/回避/复议等关键决策必须人工确认（`needs_human` 标记贯穿全链路）。
-3. **可复现可审计**：MockLLM 保证离线确定性；AuditTrail 记录每个动作与依据。
+1. **規則外置**：計劃差異收斂到 YAML 聲明式配置（`configs/`），代碼零改動適配新計劃。
+2. **人機協同**：Agent 只做「檢查與建議」，淘汰/迴避/複議等關鍵決策必須人工確認（`needs_human` 標記貫穿全鏈路）。
+3. **可復現可審計**：MockLLM 保證離線確定性；AuditTrail 記錄每個動作與依據。
 
-## 2. 模块职责
+## 2. 模塊職責
 
-| 模块 | 职责 | 关键设计 |
+| 模塊 | 職責 | 關鍵設計 |
 |---|---|---|
-| `ingest.py` | 多格式解析 | 每种格式独立解析器；依赖可选、失败不中断（`error` 字段） |
-| `extract.py` | LLM 结构化抽取 | JSON 输出 + 解析容错降级；Mock/真实 LLM 同接口 |
-| `check.py` | 完整性/合规审查 | 规则引擎按 YAML 执行；利益冲突用「评审人→关键词」映射 |
-| `extract.py::cross_verify` | 跨源比对 | 数值容差 5%；标题/邮箱双向包含匹配 |
-| `extract.py::anomaly_scan` | 批次异常 | 中位数 ± 5×MAD 稳健离群检测 |
-| `summarize.py` | 摘要与资料包 | 模板化 + LLM 凝练；输出 summary/one_pager/checklist |
-| `review.py` | 评审汇总 | 维度归一百分制加权；总分差 ≥ 阈值触发复议 |
-| `track.py` | 项目追踪 | 逾期/临期（14 天）两级预警；资助发放进度表 |
-| `pipeline.py` | 编排 | 阶段式 Agentic Workflow，全程 AuditTrail |
-| `llm.py` | LLM 抽象 | Protocol 接口；Mock（离线启发式）/ OpenAI 兼容端点 |
+| `ingest.py` | 多格式解析 | 每種格式獨立解析器；依賴可選、失敗不中斷（`error` 字段） |
+| `extract.py` | LLM 結構化抽取 | JSON 輸出 + 解析容錯降級；Mock/真實 LLM 同接口 |
+| `check.py` | 完整性/合規審查 | 規則引擎按 YAML 執行；利益衝突用「評審人→關鍵詞」映射 |
+| `extract.py::cross_verify` | 跨源比對 | 數值容差 5%；標題/郵箱雙向包含匹配 |
+| `extract.py::anomaly_scan` | 批次異常 | 中位數 ± 5×MAD 穩健離羣檢測 |
+| `summarize.py` | 摘要與資料包 | 模板化 + LLM 凝練；輸出 summary/one_pager/checklist |
+| `review.py` | 評審彙總 | 維度歸一百分制加權；總分差 ≥ 閾值觸發複議 |
+| `track.py` | 項目追蹤 | 逾期/臨期（14 天）兩級預警；資助發放進度表 |
+| `pipeline.py` | 編排 | 階段式 Agentic Workflow，全程 AuditTrail |
+| `llm.py` | LLM 抽象 | Protocol 接口；Mock（離線啓發式）/ OpenAI 兼容端點 |
 
-## 3. 数据流
+## 3. 數據流
 
-申请目录（meta.json + 附件）→ `load_applications` → `Application(docs=[Document...])`
-→ intake 产出 `extracted: dict` + `findings: [Finding]`
-→ build_packs 产出评审资料包目录
-→ review 消费 `ReviewScore[]` 产出加权结果/通知/待办
-→ track 消费 `Milestone[]` 产出管理报告
+申請目錄（meta.json + 附件）→ `load_applications` → `Application(docs=[Document...])`
+→ intake 產出 `extracted: dict` + `findings: [Finding]`
+→ build_packs 產出評審資料包目錄
+→ review 消費 `ReviewScore[]` 產出加權結果/通知/待辦
+→ track 消費 `Milestone[]` 產出管理報告
 
-所有中间产物落盘（Markdown/JSON），天然支持「断点续跑」与人工介入。
+所有中間產物落盤（Markdown/JSON），天然支持「斷點續跑」與人工介入。
 
-## 4. 扩展点
+## 4. 擴展點
 
-- **新格式**：在 `ingest._EXT_MAP` + 新增解析函数即可。
-- **新计划**：复制 `configs/program_demo.yaml` 改配置。
-- **新规则**：`check_completeness` 为纯函数，便于单测与扩展。
-- **MCP 封装**：各 Agent 均为无状态纯函数，可直接包为 MCP 工具供跨赛道复用。
+- **新格式**：在 `ingest._EXT_MAP` + 新增解析函數即可。
+- **新計劃**：複製 `configs/program_demo.yaml` 改配置。
+- **新規則**：`check_completeness` 為純函數，便於單測與擴展。
+- **MCP 封裝**：各 Agent 均為無狀態純函數，可直接包為 MCP 工具供跨賽道複用。

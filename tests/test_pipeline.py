@@ -1,4 +1,4 @@
-"""端到端测试：用 demo 数据验证审查发现、批次检查、评审汇总、追踪预警。"""
+"""端到端測試：用 demo 數據驗證審查發現、批次檢查、評審彙總、追蹤預警。"""
 import json
 import sys
 from pathlib import Path
@@ -25,28 +25,28 @@ def test_intake_findings():
     _, pipe, apps = _setup()
     res = {a.app_id: pipe.intake(a) for a in apps}
 
-    # app001：应基本干净（可能有 demo 视频缺失等 info 级提示）
+    # app001：應基本乾淨（可能有 demo 視頻缺失等 info 級提示）
     f1 = res["APP-2027-001"][1]
     assert not any(f.severity.value in ("error", "critical") for f in f1), f1
 
-    # app002：预算前后矛盾（150,000 vs 95,000）
+    # app002：預算前後矛盾（150,000 vs 95,000）
     f2 = res["APP-2027-002"][1]
-    assert any(f.finding_type.value == "inconsistent" and "预算" in f.message for f in f2)
+    assert any(f.finding_type.value == "inconsistent" and "預算" in f.message for f in f2)
 
-    # app003：人数超标 + 预算超上限 + 利益冲突（CUHK）
+    # app003：人數超標 + 預算超上限 + 利益衝突（CUHK）
     f3 = res["APP-2027-003"][1]
     msgs = " | ".join(f.message for f in f3)
-    assert "团队人数" in msgs
-    assert "超出计划上限" in msgs
-    assert "利益冲突" in msgs
+    assert "團隊人數" in msgs
+    assert "超出計劃上限" in msgs
+    assert "利益衝突" in msgs
 
 
 def test_batch_checks():
     _, pipe, apps = _setup()
     batch = pipe.batch_checks(apps)
     msgs = " | ".join(f.message for f in batch)
-    assert "疑似重复申请" in msgs          # app001 与 app003 重复
-    assert "显著偏离" in msgs              # 2,000,000 预算离群
+    assert "疑似重複申請" in msgs          # app001 與 app003 重複
+    assert "顯著偏離" in msgs              # 2,000,000 預算離羣
 
 
 def test_review_aggregation():
@@ -57,14 +57,14 @@ def test_review_aggregation():
               for d in data if d["app_id"] == "APP-2027-002"]
     agg = aggregate(scores, prog)
     assert agg["weighted_total"] is not None
-    assert any("分歧" in f for f in agg["flags"])   # 两位评审差异 > 15 → 触发复议
+    assert any("分歧" in f for f in agg["flags"])   # 兩位評審差異 > 15 → 觸發複議
 
 
 def test_tracking_alerts():
     from datetime import date
     from kkg.track import check_milestones
     ms = [
-        Milestone("启动", "2020-01-01", "pending", 10000),   # 已逾期
+        Milestone("啓動", "2020-01-01", "pending", 10000),   # 已逾期
         Milestone("中期", "2099-01-01", "pending", 20000),   # 正常
     ]
     alerts = check_milestones(ms, today=date(2026, 6, 1))

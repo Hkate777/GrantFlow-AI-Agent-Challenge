@@ -1,13 +1,13 @@
 {
   "app_id": "APP-2027-002",
   "program": "HK-ACC-2027",
-  "title": "校园心理健康早期预警智能体",
-  "applicant": "梧桐树团队（香港城市大学）",
+  "title": "校園心理健康早期預警智能體",
+  "applicant": "梧桐樹團隊（香港城市大學）",
   "email": "wutongshu@cityu.edu.hk",
-  "team": ["林晓彤", "黄启文"],
+  "team": ["林曉彤", "黃啓文"],
   "fields": {
     "org_type": "university",
-    "contact": "林晓彤",
+    "contact": "林曉彤",
     "email": "wutongshu@cityu.edu.hk",
     "budget": "150000",
     "duration_m": "18"

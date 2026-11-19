@@ -1,6 +1,6 @@
-"""GrantFlow Web 面板：FastAPI 提供最小可用 UI —— 上传批次、查看发现、评审汇总、追踪预警。
+"""GrantFlow Web 面板：FastAPI 提供最小可用 UI —— 上傳批次、查看發現、評審彙總、追蹤預警。
 
-运行：python app.py  →  http://127.0.0.1:8000
+運行：python app.py  →  http://127.0.0.1:8000
 """
 from __future__ import annotations
 
@@ -34,23 +34,23 @@ table{border-collapse:collapse;width:100%}td,th{border:1px solid #e5e7eb;padding
 button{background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:.5rem 1.1rem;cursor:pointer}
 pre{background:#f9fafb;padding:.8rem;border-radius:8px;overflow:auto}
 </style></head><body>
-<h1>GrantFlow · 申请评审与项目管理流程自动化 <span class="badge">KK_Garden · 场景16</span></h1>
-<p>计划：<b id="pname"></b>（截止 <span id="pdl"></span>）</p>
-<button onclick="run()">▶ 运行 Demo 批次审查</button>
+<h1>GrantFlow · 申請評審與項目管理流程自動化 <span class="badge">KK_Garden · 場景16</span></h1>
+<p>計劃：<b id="pname"></b>（截止 <span id="pdl"></span>）</p>
+<button onclick="run()">▶ 運行 Demo 批次審查</button>
 <div id="out"></div>
 <script>
 fetch('/api/program').then(r=>r.json()).then(p=>{pname.textContent=p.name;pdl.textContent=p.deadline||'N/A'});
 function run(){
- out.innerHTML='<p>运行中…</p>';
+ out.innerHTML='<p>運行中…</p>';
  fetch('/api/run').then(r=>r.json()).then(d=>{
-  let h='<h2>审查结果</h2>';
+  let h='<h2>審查結果</h2>';
   for(const a of d.applications){
-   h+=`<div class="card"><b>${a.app_id} «${a.title}»</b> — ${a.applicant}<br>发现 ${a.findings.length} 项：`;
-   if(!a.findings.length)h+=' ✅ 无问题';
-   h+='<ul>'+a.findings.map(f=>`<li class="sev-${f.severity}">[${f.type}] ${f.message}${f.needs_human?'（需人工复核）':''}</li>`).join('')+'</ul></div>';
+   h+=`<div class="card"><b>${a.app_id} «${a.title}»</b> — ${a.applicant}<br>發現 ${a.findings.length} 項：`;
+   if(!a.findings.length)h+=' ✅ 無問題';
+   h+='<ul>'+a.findings.map(f=>`<li class="sev-${f.severity}">[${f.type}] ${f.message}${f.needs_human?'（需人工複核）':''}</li>`).join('')+'</ul></div>';
   }
-  if(d.batch_findings.length){h+='<h2>批次检查</h2><ul>'+d.batch_findings.map(f=>`<li class="sev-${f.severity}">${f.message}</li>`).join('')+'</ul>';}
-  h+='<h2>审计日志</h2><pre>'+JSON.stringify(d.audit,null,2)+'</pre>';
+  if(d.batch_findings.length){h+='<h2>批次檢查</h2><ul>'+d.batch_findings.map(f=>`<li class="sev-${f.severity}">${f.message}</li>`).join('')+'</ul>';}
+  h+='<h2>審計日誌</h2><pre>'+JSON.stringify(d.audit,null,2)+'</pre>';
   out.innerHTML=h;
  });
 }

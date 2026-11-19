@@ -1,7 +1,7 @@
-"""计划配置：每个资助计划的要求用 YAML 描述，规则引擎按配置执行。
+"""計劃配置：每個資助計劃的要求用 YAML 描述，規則引擎按配置執行。
 
-这对应场景 16 的核心难点：不同计划的申请要求、格式、资格、评审准则各不相同，
-因此把「计划规则」做成声明式配置，而非写死在代码里。
+這對應場景 16 的核心難點：不同計劃的申請要求、格式、資格、評審準則各不相同，
+因此把「計劃規則」做成聲明式配置，而非寫死在代碼裏。
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import yaml
 
 @dataclass
 class RequiredDoc:
-    name: str                       # 文件名关键词匹配（不区分大小写）
+    name: str                       # 文件名關鍵詞匹配（不區分大小寫）
     doc_type: str = "any"           # text/pdf/docx/xlsx/image/any
     required: bool = True
 
@@ -40,7 +40,7 @@ class Eligibility:
     min_team: int = 1
     max_team: int = 10
     allowed_org_types: list[str] = field(default_factory=list)  # 空 = 不限制
-    excluded_keywords: list[str] = field(default_factory=list)   # 项目标题/描述中出现即不合格
+    excluded_keywords: list[str] = field(default_factory=list)   # 項目標題/描述中出現即不合格
 
 
 @dataclass
@@ -53,8 +53,8 @@ class Program:
     criteria: list[ReviewCriterion] = field(default_factory=list)
     eligibility: Eligibility = field(default_factory=Eligibility)
     budget_cap: float | None = None
-    divergence_threshold: float = 15.0   # 评分差异阈值（百分制），超过即需讨论
-    conflict_rules: dict[str, list[str]] = field(default_factory=dict)  # reviewer -> 冲突关键词
+    divergence_threshold: float = 15.0   # 評分差異閾值（百分制），超過即需討論
+    conflict_rules: dict[str, list[str]] = field(default_factory=dict)  # reviewer -> 衝突關鍵詞
 
     @staticmethod
     def load(path: str | Path) -> "Program":

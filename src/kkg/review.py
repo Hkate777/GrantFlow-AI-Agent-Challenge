@@ -1,4 +1,4 @@
-"""评审汇总 Agent：汇总评分与评语、识别分歧、生成结果通知与后续待办。"""
+"""評審彙總 Agent：彙總評分與評語、識別分歧、生成結果通知與後續待辦。"""
 from __future__ import annotations
 
 from statistics import mean, pstdev
@@ -8,7 +8,7 @@ from .program import Program
 
 
 def aggregate(scores: list[ReviewScore], prog: Program) -> dict:
-    """按计划维度权重计算加权总分；识别评分差异过大的项目与维度。"""
+    """按計劃維度權重計算加權總分；識別評分差異過大的項目與維度。"""
     if not scores:
         return {"n_reviewers": 0, "weighted_total": None, "per_criterion": {}, "flags": []}
 
@@ -27,7 +27,7 @@ def aggregate(scores: list[ReviewScore], prog: Program) -> dict:
         }
 
     def _weighted(s: ReviewScore) -> float:
-        # 归一到百分制
+        # 歸一到百分制
         acc = 0.0
         for name, w in weights.items():
             m = max_scores.get(name, 25) or 25
@@ -40,11 +40,11 @@ def aggregate(scores: list[ReviewScore], prog: Program) -> dict:
     flags: list[str] = []
     if spread >= prog.divergence_threshold:
         flags.append(
-            f"评审分歧显著：最高 {max(weighted)} vs 最低 {min(weighted)}，"
-            f"差值 {spread:.1f} ≥ 阈值 {prog.divergence_threshold}，需安排复议讨论。")
+            f"評審分歧顯著：最高 {max(weighted)} vs 最低 {min(weighted)}，"
+            f"差值 {spread:.1f} ≥ 閾值 {prog.divergence_threshold}，需安排複議討論。")
     for name, st in per_crit.items():
         if st["stdev"] > st["max"] * 0.25:
-            flags.append(f"维度「{name}」评分波动大（标准差 {st['stdev']:.1f}），建议复核该维度评分依据。")
+            flags.append(f"維度「{name}」評分波動大（標準差 {st['stdev']:.1f}），建議複核該維度評分依據。")
 
     return {
         "n_reviewers": len(scores),
@@ -58,25 +58,25 @@ def aggregate(scores: list[ReviewScore], prog: Program) -> dict:
 
 
 def result_notice(app_id: str, title: str, agg: dict, passed: bool) -> str:
-    head = "✅ 通过" if passed else "❌ 未通过"
+    head = "✅ 通過" if passed else "❌ 未通過"
     lines = [
-        f"# 评审结果通知 · {app_id}",
+        f"# 評審結果通知 · {app_id}",
         "",
-        f"申请项目「{title}」评审完成：{head}。",
-        f"- 加权总分（百分制）：{agg.get('weighted_total', 'N/A')}",
-        f"- 评审人数：{agg.get('n_reviewers', 0)}",
+        f"申請項目「{title}」評審完成：{head}。",
+        f"- 加權總分（百分制）：{agg.get('weighted_total', 'N/A')}",
+        f"- 評審人數：{agg.get('n_reviewers', 0)}",
     ]
     if agg.get("flags"):
-        lines += ["", "## 备注"] + [f"- {f}" for f in agg["flags"]]
+        lines += ["", "## 備註"] + [f"- {f}" for f in agg["flags"]]
     return "\n".join(lines)
 
 
 def followup_todos(app_id: str, agg: dict) -> list[str]:
-    todos = [f"[{app_id}] 向申请人发送评审结果通知"]
+    todos = [f"[{app_id}] 向申請人發送評審結果通知"]
     if agg.get("flags"):
-        todos.append(f"[{app_id}] 组织复议会议：处理评分分歧（{len(agg['flags'])} 项）")
+        todos.append(f"[{app_id}] 組織複議會議：處理評分分歧（{len(agg['flags'])} 項）")
     todos += [
-        f"[{app_id}] 归档评审资料包与审计日志",
-        f"[{app_id}] 建立项目追踪台账（里程碑/资助发放/定期报告）",
+        f"[{app_id}] 歸檔評審資料包與審計日誌",
+        f"[{app_id}] 建立項目追蹤台賬（里程碑/資助發放/定期報告）",
     ]
     return todos
