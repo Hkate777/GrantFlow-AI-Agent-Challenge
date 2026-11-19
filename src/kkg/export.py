@@ -23,6 +23,7 @@ from .llm import get_llm                                   # noqa: E402
 from .models import Finding, ReviewScore                   # noqa: E402
 from .pipeline import Pipeline, load_applications           # noqa: E402
 from .program import Program                                # noqa: E402
+from .review import STATUS_LABELS, assess, aggregate        # noqa: E402
 
 HEADER_FILL = PatternFill("solid", fgColor="1F4E79")
 HEADER_FONT = Font(bold=True, color="FFFFFF")
@@ -50,16 +51,14 @@ def export_workbook(prog: Program, apps: list, findings: dict[str, list[Finding]
     pipe = Pipeline(prog)
     for a in apps:
         fd = findings.get(a.app_id, [])
-        agg = pipe.review(a, scores.get(a.app_id, []))
+        rows = scores.get(a.app_id, [])
+        # 與工作台/CLI 同一評估口徑：assess 消費計劃門檻、min_reviewers、批次發現與狀態機，
+        # 不再用硬編碼 60 分自行判斷「建議入圍」。
+        agg = assess(rows, prog, fd, pass_threshold=prog.pass_threshold)
         total = agg.get("weighted_total")
         serious = sum(1 for f in fd if f.severity.value in ("error", "critical"))
         human = sum(1 for f in fd if f.needs_human)
-        if serious:
-            suggestion = "需補正 / 人工複核"
-        elif total is not None and total >= 60:
-            suggestion = "建議入圍"
-        else:
-            suggestion = "待評審"
+        suggestion = STATUS_LABELS[agg["status"]]
         ws.append([a.app_id, prog.name, _mask(a.title), _mask(a.applicant), _mask(a.email),
                    len(fd), serious, human, total if total is not None else "-", suggestion])
     ws.freeze_panes = "A2"
@@ -79,17 +78,19 @@ def export_workbook(prog: Program, apps: list, findings: dict[str, list[Finding]
     for col, width in zip("ABCDEF", [16, 16, 12, 70, 24, 14]):
         ws2.column_dimensions[col].width = width
 
-    # Sheet 3：評分明細
+    # Sheet 3：評分明細（含每位評審的加權分，與總覽口徑一致）
     ws3 = wb.create_sheet("評分明細")
     criteria = [c.name for c in prog.criteria]
     ws3.append(["申請編號", "評審"] + criteria + ["加權總分", "評語"])
     for c in ws3[1]:
         c.fill, c.font = HEADER_FILL, HEADER_FONT
     for a in apps:
-        for s in scores.get(a.app_id, []):
+        rows = scores.get(a.app_id, [])
+        per_reviewer = aggregate(rows, prog).get("per_reviewer_weighted", {})
+        for s in rows:
             ws3.append([a.app_id, _mask(s.reviewer)] +
                        [s.criteria.get(k, 0) for k in criteria] +
-                       [round(s.total, 2), _mask(s.comment)])
+                       [per_reviewer.get(s.reviewer, "-"), _mask(s.comment)])
     ws3.freeze_panes = "A2"
     for col in "ABCDEFGH":
         ws3.column_dimensions[col].width = 18
@@ -119,10 +120,10 @@ def main() -> None:
         _, findings[a.app_id] = pipe.intake(a)
     findings_all = {k: v + [] for k, v in findings.items()}
     for f in pipe.batch_checks(apps):
-        # 批次發現歸到相關申請（簡單以訊息中包含的編號匹配）
-        for a in apps:
-            if a.app_id in f.message:
-                findings_all.setdefault(a.app_id, []).append(f)
+        # 批次發現歸到相關申請：優先用 application_ids，訊息匹配作後備
+        ids = getattr(f, "application_ids", []) or [a.app_id for a in apps if a.app_id in f.message]
+        for app_id in ids:
+            findings_all.setdefault(app_id, []).append(f)
 
     scores: dict[str, list[ReviewScore]] = {}
     for p in Path(args.reviews).glob("*.json"):

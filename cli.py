@@ -3,10 +3,17 @@
 
 用法：
   python cli.py --program configs/program_demo.yaml --apps data/demo/applications \
-      --reviews data/demo/reviews --out output [--llm mock|openai]
+      --reviews data/demo/reviews --out output [--llm mock|openai] [--region HK]
+
+融合說明（codex/web-workbench-merge）：
+- 保留 main 線的多地區審查與多模型選擇。
+- 加回工作台線的評審匯出修復：正式通知須人工簽發，CLI 寫出評審進度草稿
+  （review_draft）與每案結構化 _review.json；重跑寫入 out/runs/<時間戳>/，
+  不覆蓋前次批次與根目錄審計日誌。
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import argparse
 import json
 import sys
@@ -19,6 +26,7 @@ from kkg.models import Milestone, ReviewScore      # noqa: E402
 from kkg.pipeline import Pipeline, load_applications  # noqa: E402
 from kkg.program import Program                    # noqa: E402
 from kkg.region import Region                      # noqa: E402
+from kkg.review import review_draft                # noqa: E402
 
 
 def _load_reviews(root: str | Path) -> dict[str, list[ReviewScore]]:
@@ -34,6 +42,29 @@ def _load_reviews(root: str | Path) -> dict[str, list[ReviewScore]]:
                             criteria=item["criteria"],
                             comment=item.get("comment", "")))
     return out
+
+
+def _run_output(out: Path) -> Path:
+    """首次執行寫入 out/；重跑寫入 out/runs/<時間戳>/，保留前次結果不覆蓋。"""
+    root = Path(out)
+    root.mkdir(parents=True, exist_ok=True)
+    if (root / "audit_log.json").exists():
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        run_dir = root / "runs" / stamp
+        run_dir.mkdir(parents=True, exist_ok=True)
+        return run_dir
+    return root
+
+
+def _findings_by_app(findings) -> dict[str, list[dict]]:
+    """按 Finding.application_ids 把批次發現帶入對應申請。"""
+    mapping: dict[str, list[dict]] = {}
+    for f in findings:
+        entry = {"type": f.finding_type.value, "severity": f.severity.value,
+                 "message": f.message, "source": getattr(f, "source", "")}
+        for app_id in getattr(f, "application_ids", []) or []:
+            mapping.setdefault(app_id, []).append(entry)
+    return mapping
 
 
 def main() -> None:
@@ -55,11 +86,13 @@ def main() -> None:
     if region is None:
         raise SystemExit(f"未知地區：{args.region}，可選：{'、'.join(regions)}")
     pipe = Pipeline(prog, llm=llm, pass_threshold=args.pass_threshold, region=region)
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
+    out = _run_output(Path(args.out))
 
     print(f"[1/6] 加載計劃配置：{prog.name}  |  地區：{region.name}  |  LLM：{llm.name}")
-    apps = load_applications(args.apps)
+    load_errors: list[str] = []
+    apps = load_applications(args.apps, errors=load_errors)
+    for err in load_errors:
+        print(f"      [注意] 跳過無效申請：{err}")
     print(f"[2/6] 受理申請{len(apps)}份，解析附件 …")
 
     extracts, findings = {}, {}
@@ -71,6 +104,7 @@ def main() -> None:
         print(f"      {a.app_id} «{a.title}»：發現{len(fd)}項（嚴重{n_err}）")
 
     batch_fd = pipe.batch_checks(apps)
+    batch_map = _findings_by_app(batch_fd)
     if batch_fd:
         print("[3/6] 批次檢查：")
         for f in batch_fd:
@@ -86,9 +120,25 @@ def main() -> None:
     review_dir.mkdir(exist_ok=True)
     print("[5/6] 評審彙總：")
     for a in apps:
-        agg = pipe.review(a, reviews.get(a.app_id, []))
-        (review_dir / f"{a.app_id}_result.md").write_text(agg["notice"], encoding="utf-8")
+        agg = pipe.review(a, reviews.get(a.app_id, []), findings=findings[a.app_id])
+        # 正式通知須人工簽發（notice 為 None）；此處寫出評審進度草稿。
+        (review_dir / f"{a.app_id}_draft.md").write_text(
+            review_draft(a.app_id, a.title, agg), encoding="utf-8")
         (review_dir / f"{a.app_id}_todos.md").write_text("\n".join(agg["todos"]), encoding="utf-8")
+        structured = {
+            "app_id": a.app_id,
+            "status": agg["status"],
+            "notice": agg["notice"],
+            "weighted_total": agg.get("weighted_total"),
+            "n_reviewers": agg.get("n_reviewers", 0),
+            "flags": agg.get("flags", []),
+            "holds": agg.get("holds", []),
+            "comments": agg.get("comments", []),
+            "todos": agg.get("todos", []),
+            "batch_findings": batch_map.get(a.app_id, []),
+        }
+        (review_dir / f"{a.app_id}_review.json").write_text(
+            json.dumps(structured, ensure_ascii=False, indent=2), encoding="utf-8")
         if agg.get("weighted_total") is not None:
             flags = f"  [注意] {'; '.join(agg['flags'])}" if agg["flags"] else ""
             print(f"      {a.app_id}加權總分{agg['weighted_total']}（{agg['n_reviewers']}人）{flags}")

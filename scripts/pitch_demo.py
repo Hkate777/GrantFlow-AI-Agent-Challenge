@@ -24,7 +24,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from kkg.llm import get_llm                                 # noqa: E402
 from kkg.models import Milestone, ReviewScore                # noqa: E402
-from kkg.pipeline import Pipeline, load_applications          # noqa: E402
+from kkg.pipeline import Pipeline, load_applications
+from kkg.review import review_draft          # noqa: E402
 from kkg.program import Program                              # noqa: E402
 
 
@@ -66,8 +67,9 @@ def main() -> None:
     rev_dir = out / "review"
     rev_dir.mkdir(exist_ok=True)
     for a in apps:
-        agg = pipe.review(a, scores.get(a.app_id, []))
-        (rev_dir / f"{a.app_id}_result.md").write_text(agg["notice"], encoding="utf-8")
+        agg = pipe.review(a, scores.get(a.app_id, []), findings=findings[a.app_id])
+        (rev_dir / f"{a.app_id}_draft.md").write_text(
+            review_draft(a.app_id, a.title, agg), encoding="utf-8")
         (rev_dir / f"{a.app_id}_todos.md").write_text("\n".join(agg["todos"]), encoding="utf-8")
 
     track_dir = out / "tracking"

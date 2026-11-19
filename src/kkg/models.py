@@ -44,6 +44,12 @@ class FindingType(str, Enum):
 
 
 @dataclass
+class EvidenceSpan:
+    locator: str
+    text: str
+
+
+@dataclass
 class Document:
     path: str
     name: str
@@ -51,6 +57,7 @@ class Document:
     text: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
+    segments: list[EvidenceSpan] = field(default_factory=list)  # 原文證據位置（頁碼/行/表格）
 
 
 @dataclass
@@ -77,6 +84,7 @@ class Finding:
     detail: str = ""
     source: str = ""          # 觸發來源（規則名/文檔名）
     needs_human: bool = False  # 是否需人工複核
+    application_ids: list[str] = field(default_factory=list)  # 批次發現涉及的申請
 
 
 @dataclass
