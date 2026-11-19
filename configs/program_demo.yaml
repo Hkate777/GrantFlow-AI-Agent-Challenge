@@ -1,0 +1,45 @@
+# 示范资助计划：HK 创科加速计划 2027
+program_id: HK-ACC-2027
+name: "香港创科加速计划 2027（示范配置）"
+deadline: "2027-01-03"
+
+# 必填表单字段
+required_fields:
+  - { key: org_type,    label: 申请主体类型, ftype: str }
+  - { key: contact,     label: 联系人,       ftype: str }
+  - { key: email,       label: 联系邮箱,     ftype: email }
+  - { key: budget,      label: 申请预算(HKD), ftype: number, min_value: 10000 }
+  - { key: duration_m,  label: 项目周期(月), ftype: number, min_value: 3, max_value: 36 }
+
+# 必备/建议附件（按文件名关键词匹配）
+required_docs:
+  - { name: proposal,    doc_type: any, required: true }   # 项目申请书
+  - { name: budget,      doc_type: any, required: true }   # 预算表
+  - { name: cv,          doc_type: any, required: true }   # 团队简历
+  - { name: endorsement, doc_type: any, required: false }  # 推荐信（建议）
+  - { name: demo,        doc_type: any, required: false }  # 演示视频（建议）
+
+# 评审维度（对应评审框架；百分制归一由 review.py 完成）
+criteria:
+  - { name: 创新性,     weight: 3, max_score: 30 }
+  - { name: 可行性,     weight: 3, max_score: 30 }
+  - { name: 团队能力,   weight: 2, max_score: 20 }
+  - { name: 社会价值,   weight: 2, max_score: 20 }
+
+# 资格条件
+eligibility:
+  min_team: 1
+  max_team: 8
+  allowed_org_types: [ university, research_institute, enterprise, startup ]
+  excluded_keywords: [ "gambling", "赌博", "arms", "武器" ]
+
+# 预算上限（HKD）
+budget_cap: 500000
+
+# 评审分歧阈值：加权总分(百分制)差值超过该值 → 触发复议
+divergence_threshold: 15
+
+# 潜在利益冲突：评审人 -> 冲突关键词（出现在申请中即回避）
+conflict_rules:
+  "Prof. Chan": [ "CUHK", "香港中文大学" ]
+  "Dr. Lee":    [ "NetDragon", "网龙" ]
