@@ -1,0 +1,22 @@
+program_id: HK-CAMPUS-2027
+name: 大學校園試點資助計劃
+deadline: '2027-03-31'
+budget_cap: 200000
+pass_threshold: 70
+divergence_threshold: 20
+required_fields:
+  - {key: org_type, label: 申請主體類型, ftype: str}
+  - {key: contact, label: 聯絡人, ftype: str}
+  - {key: email, label: 聯絡電郵, ftype: email}
+  - {key: budget, label: 申請預算（港元）, ftype: number, min_value: 2000}
+required_docs:
+  - {name: proposal, doc_type: pdf, required: true}
+  - {name: budget, doc_type: xlsx, required: true}
+criteria:
+  - {name: 校園需求, weight: 4, max_score: 40}
+  - {name: 落地能力, weight: 4, max_score: 40}
+  - {name: 成效指標, weight: 2, max_score: 20}
+eligibility:
+  min_team: 1
+  max_team: 5
+  allowed_org_types: [university, research_institute]

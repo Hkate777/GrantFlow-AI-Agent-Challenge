@@ -1,87 +1,307 @@
-"""GrantFlow Web 面板：FastAPI 提供最小可用 UI —— 上傳批次、查看發現、評審彙總、追蹤預警。
-
-運行：python app.py  →  http://127.0.0.1:8000
-"""
+"""GrantFlow local operator workstation."""
 from __future__ import annotations
 
+import argparse
+import io
+import ipaddress
 import json
+import os
 import sys
+from dataclasses import asdict
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any, Literal
+from zipfile import ZIP_DEFLATED, ZipFile
 
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat
+from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.staticfiles import StaticFiles
 
-from fastapi import FastAPI                            # noqa: E402
-from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
+BASE = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE / "src"))
 
-from kkg.llm import get_llm                            # noqa: E402
-from kkg.pipeline import Pipeline, load_applications   # noqa: E402
-from kkg.program import Program                        # noqa: E402
-
-BASE = Path(__file__).parent
-prog = Program.load(BASE / "configs" / "program_demo.yaml")
-pipe = Pipeline(prog, llm=get_llm("auto"))
-
-app = FastAPI(title="GrantFlow · KK_Garden", version="0.1.0")
-
-PAGE = """<!doctype html><html lang="zh"><head><meta charset="utf-8">
-<title>GrantFlow · KK_Garden</title>
-<style>
-body{font-family:system-ui,'PingFang SC','Microsoft YaHei',sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#1f2937}
-h1{font-size:1.4rem} .card{border:1px solid #e5e7eb;border-radius:10px;padding:1rem;margin:.8rem 0}
-.sev-error,.sev-critical{color:#dc2626}.sev-warning{color:#d97706}.sev-info{color:#2563eb}
-table{border-collapse:collapse;width:100%}td,th{border:1px solid #e5e7eb;padding:.4rem .6rem;text-align:left}
-.badge{display:inline-block;background:#eef2ff;border-radius:999px;padding:.1rem .6rem;font-size:.8rem}
-button{background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:.5rem 1.1rem;cursor:pointer}
-pre{background:#f9fafb;padding:.8rem;border-radius:8px;overflow:auto}
-</style></head><body>
-<h1>GrantFlow · 申請評審與項目管理流程自動化 <span class="badge">KK_Garden · 場景16</span></h1>
-<p>計劃：<b id="pname"></b>（截止 <span id="pdl"></span>）</p>
-<button onclick="run()">▶ 運行 Demo 批次審查</button>
-<div id="out"></div>
-<script>
-fetch('/api/program').then(r=>r.json()).then(p=>{pname.textContent=p.name;pdl.textContent=p.deadline||'N/A'});
-function run(){
- out.innerHTML='<p>運行中…</p>';
- fetch('/api/run').then(r=>r.json()).then(d=>{
-  let h='<h2>審查結果</h2>';
-  for(const a of d.applications){
-   h+=`<div class="card"><b>${a.app_id} «${a.title}»</b> — ${a.applicant}<br>發現 ${a.findings.length} 項：`;
-   if(!a.findings.length)h+=' ✅ 無問題';
-   h+='<ul>'+a.findings.map(f=>`<li class="sev-${f.severity}">[${f.type}] ${f.message}${f.needs_human?'（需人工複核）':''}</li>`).join('')+'</ul></div>';
-  }
-  if(d.batch_findings.length){h+='<h2>批次檢查</h2><ul>'+d.batch_findings.map(f=>`<li class="sev-${f.severity}">${f.message}</li>`).join('')+'</ul>';}
-  h+='<h2>審計日誌</h2><pre>'+JSON.stringify(d.audit,null,2)+'</pre>';
-  out.innerHTML=h;
- });
-}
-</script></body></html>"""
+from kkg.llm import MockLLM
+from kkg.models import Finding, FindingType, Milestone, ReviewScore, Severity
+from kkg.pipeline import Pipeline, load_applications
+from kkg.program import Program
+from kkg.storage import CaseStore, MissingCase, WorkspaceConflict
+from kkg.submission import MAX_FILES, MAX_FILE_BYTES, MAX_METADATA_BYTES, MAX_UPLOAD_BYTES, read_message, read_metadata
+from kkg.summarize import reviewer_pack
+from kkg.track import Disbursement, PeriodicReport, management_report
+from kkg.workspace import Workspace
 
 
-@app.get("/", response_class=HTMLResponse)
-def index() -> str:
-    return PAGE
+class Input(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
-@app.get("/api/program")
-def api_program() -> dict:
-    return {"program_id": prog.program_id, "name": prog.name, "deadline": prog.deadline,
-            "criteria": [vars(c) for c in prog.criteria]}
+class Revision(Input):
+    revision: int = Field(ge=1, strict=True)
 
 
-@app.get("/api/run")
-def api_run() -> JSONResponse:
-    apps = load_applications(BASE / "data" / "demo" / "applications")
-    result_apps = []
-    for a in apps:
-        _, findings = pipe.intake(a)
-        result_apps.append({
-            "app_id": a.app_id, "title": a.title, "applicant": a.applicant,
-            "findings": [{"type": f.finding_type.value, "severity": f.severity.value,
-                          "message": f.message, "needs_human": f.needs_human} for f in findings],
-        })
-    batch = pipe.batch_checks(apps)
-    return JSONResponse({
-        "applications": result_apps,
-        "batch_findings": [{"severity": f.severity.value, "message": f.message} for f in batch],
-        "audit": json.loads(pipe.audit_json()),
-    })
+class ScoreRow(Input):
+    reviewer: str = Field(max_length=120)
+    criteria: dict[str, Any]
+    comment: str = Field(default="", max_length=4000)
+
+
+class ScoresInput(Revision):
+    scores: list[ScoreRow] = Field(max_length=100)
+    actor: str = "本機操作員"
+
+
+class ResolutionInput(Revision):
+    actor: str
+    reason: str
+
+
+class DecisionInput(ResolutionInput):
+    outcome: Literal["approved", "declined"]
+
+
+class MilestoneRow(Input):
+    name: str = Field(max_length=200)
+    due: str
+    status: Literal["pending", "done"] = "pending"
+
+
+class ReportRow(Input):
+    name: str = Field(max_length=200)
+    due: str
+    submitted_at: str = ""
+
+
+class PaymentRow(Input):
+    name: str = Field(max_length=200)
+    due: str
+    amount: StrictFloat
+    paid_amount: StrictFloat = 0
+    paid_at: str = ""
+
+
+class ProjectInput(Revision):
+    actor: str
+    milestones: list[MilestoneRow] = Field(max_length=200)
+    periodic_reports: list[ReportRow] = Field(max_length=200)
+    disbursements: list[PaymentRow] = Field(max_length=200)
+
+
+def _programs(directory: Path) -> dict[str, Program]:
+    programs = {}
+    for config in sorted(directory.glob("*.yaml")):
+        program = Program.load(config)
+        if program.program_id in programs:
+            raise ValueError(f"計劃編號重複：{program.program_id}")
+        programs[program.program_id] = program
+    if not programs:
+        raise ValueError("找不到任何計劃設定。")
+    return programs
+
+
+def _loopback(request: Request) -> bool:
+    try:
+        return request.client is not None and ipaddress.ip_address(request.client.host).is_loopback
+    except ValueError:
+        return False
+
+
+async def _uploaded_file(upload, limit: int) -> bytes:
+    if not isinstance(upload, UploadFile) or not upload.filename:
+        raise ValueError("請選擇檔案。")
+    blob = await upload.read(limit + 1)
+    if len(blob) > limit:
+        raise ValueError(f"檔案過大：{upload.filename}")
+    return blob
+
+
+async def _intake_form(request: Request) -> tuple[dict, list[tuple[str, bytes]], dict]:
+    async with request.form(max_files=MAX_FILES, max_fields=MAX_FILES + 3, max_part_size=MAX_METADATA_BYTES) as form:
+        raw = form.get("metadata")
+        if not isinstance(raw, str):
+            raise ValueError("缺少申請表單。")
+        metadata = read_metadata(raw)
+        files = []
+        for upload in form.getlist("files"):
+            payload = await _uploaded_file(upload, MAX_FILE_BYTES)
+            files.append((upload.filename, payload))
+        options = {"actor": form.get("actor", ""), "revision": form.get("revision"),
+                   "removed": form.getlist("removed_files")}
+    return metadata, files, options
+
+
+def _demo_scores() -> dict[str, list[ReviewScore]]:
+    data = BASE / "data/demo/reviews/reviews_demo.json"
+    reviews: dict[str, list[ReviewScore]] = {}
+    for row in json.loads(data.read_text(encoding="utf-8")):
+        reviews.setdefault(row["app_id"], []).append(ReviewScore(
+            reviewer=row["reviewer"], criteria=row["criteria"], comment=row.get("comment", "")))
+    return reviews
+
+
+def create_app(database: str | Path | None = None, configs: Path | None = None) -> FastAPI:
+    database = database or os.environ.get("GRANTFLOW_DB") or BASE / "output/grantflow.sqlite3"
+    workspace = Workspace(CaseStore(database), _programs(configs or BASE / "configs"))
+    api = FastAPI(title="GrantFlow", version="0.2.0", docs_url=None, redoc_url=None)
+    api.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
+
+    @api.middleware("http")
+    async def local_requests(request: Request, call_next):
+        if not _loopback(request):
+            return JSONResponse({"detail": "工作台只接受本機連線。"}, status_code=403)
+        origin = request.headers.get("origin")
+        local_origin = f"{request.url.scheme}://{request.url.netloc}"
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and origin is not None and origin != local_origin:
+            return JSONResponse({"detail": "請在工作台內操作。"}, status_code=403)
+        length = request.headers.get("content-length")
+        if length and (not length.isdecimal() or len(length) > 10 or int(length) > MAX_UPLOAD_BYTES + 256 * 1024):
+            return JSONResponse({"detail": "請求大小超出上限。"}, status_code=413)
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = "default-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @api.exception_handler(ValueError)
+    async def invalid_input(_request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=422)
+
+    @api.exception_handler(WorkspaceConflict)
+    async def state_conflict(_request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    @api.exception_handler(MissingCase)
+    async def case_missing(_request, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=404)
+
+    @api.get("/", response_class=FileResponse)
+    def index():
+        return FileResponse(BASE / "web/index.html")
+
+    @api.get("/api/programs")
+    def programs():
+        return [{**asdict(program), "rule_version": program.rule_version} for program in workspace.programs.values()]
+
+    @api.get("/api/cases")
+    def cases():
+        return workspace.list()
+
+    @api.get("/api/cases/{case_id}")
+    def case(case_id: str):
+        return workspace.get(case_id)[0]
+
+    @api.post("/api/demo")
+    def seed():
+        return {"added": workspace.seed(load_applications(BASE / "data/demo/applications"), _demo_scores())}
+
+    @api.post("/api/cases", status_code=201)
+    async def submit(request: Request):
+        metadata, files, _ = await _intake_form(request)
+        return await run_in_threadpool(workspace.submit, metadata, files, "web")
+
+    @api.post("/api/mail", status_code=201)
+    async def mail(request: Request):
+        async with request.form(max_files=1, max_fields=0) as form:
+            upload = form.get("message")
+            raw = await _uploaded_file(upload, MAX_UPLOAD_BYTES)
+            if not upload.filename.casefold().endswith(".eml"):
+                raise ValueError("請選擇 .eml 郵件檔。")
+        metadata, files = await run_in_threadpool(read_message, raw)
+        return await run_in_threadpool(workspace.submit, metadata, files, "email")
+
+    @api.put("/api/cases/{case_id}/materials")
+    async def amend(case_id: str, request: Request):
+        metadata, files, options = await _intake_form(request)
+        raw_revision = options["revision"]
+        if not isinstance(raw_revision, str) or not raw_revision.isdecimal() or len(raw_revision) > 12:
+            raise ValueError("缺少有效的個案版本。")
+        return await run_in_threadpool(workspace.amend, case_id, int(raw_revision),
+                                       options["actor"], metadata, files, options["removed"])
+
+    @api.put("/api/cases/{case_id}/scores")
+    def score(case_id: str, data: ScoresInput):
+        return workspace.score(case_id, data.revision, [ReviewScore(**row.model_dump()) for row in data.scores],
+                               data.actor)
+
+    @api.post("/api/cases/{case_id}/resolution")
+    def resolve(case_id: str, data: ResolutionInput):
+        return workspace.resolve(case_id, data.revision, data.actor, data.reason)
+
+    @api.post("/api/cases/{case_id}/decision")
+    def sign(case_id: str, data: DecisionInput):
+        return workspace.sign(case_id, data.revision, data.actor, data.reason, data.outcome)
+
+    @api.put("/api/cases/{case_id}/project")
+    def project(case_id: str, data: ProjectInput):
+        return workspace.track(case_id, data.revision, data.actor, data.model_dump(exclude={"revision", "actor"}))
+
+    @api.get("/api/cases/{case_id}/pack")
+    def pack(case_id: str):
+        detail, app = workspace.get(case_id)
+        program = workspace.program(app.program)
+        with TemporaryDirectory(prefix="grantflow-pack-") as output:
+            findings = [Finding(**{**row, "finding_type": FindingType(row["finding_type"]),
+                                   "severity": Severity(row["severity"])}) for row in detail["findings"]]
+            folder = reviewer_pack(app, program, detail["extracted"], findings, output)
+            buffer = io.BytesIO()
+            with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as archive:
+                for path in sorted(folder.glob("*.md")):
+                    archive.write(path, path.name)
+                archive.writestr("review.json", json.dumps(detail["assessment"], ensure_ascii=False, indent=2))
+                if detail["assessment"]["notice"]:
+                    archive.writestr("result.md", detail["assessment"]["notice"])
+        return Response(buffer.getvalue(), media_type="application/zip",
+                        headers={"Content-Disposition": 'attachment; filename="reviewer-pack.zip"'})
+
+    @api.get("/api/cases/{case_id}/report", response_class=PlainTextResponse)
+    def report(case_id: str):
+        detail, app = workspace.get(case_id)
+        if detail["assessment"]["status"] != "approved":
+            raise HTTPException(409, "請先簽發通過結果。")
+        current = detail["project"]
+        milestones = [Milestone(**{key: item[key] for key in ("name", "due", "status", "funding_release")})
+                      for item in current["milestones"]]
+        reports = [PeriodicReport(item["name"], item["due"], item["submitted_at"])
+                   for item in current["periodic_reports"]]
+        payments = [Disbursement(item["name"], item["due"], item["amount"], item["paid_amount"], item["paid_at"])
+                    for item in current["disbursements"]]
+        return management_report(app.app_id, app.title, milestones, reports, disbursements=payments)
+
+    # Keep the existing read-only demo API available to earlier integrations.
+    @api.get("/api/program")
+    def demo_program():
+        program = workspace.program("HK-ACC-2027")
+        return {key: value for key, value in asdict(program).items() if key in {"program_id", "name", "deadline", "criteria"}}
+
+    @api.get("/api/run")
+    def demo_run():
+        pipe = Pipeline(workspace.program("HK-ACC-2027"), MockLLM())
+        apps = load_applications(BASE / "data/demo/applications")
+        results = [{"app_id": app.app_id, "title": app.title, "applicant": app.applicant,
+                    "findings": [{"type": finding.finding_type.value, "severity": finding.severity.value,
+                                  "message": finding.message, "needs_human": finding.needs_human}
+                                 for finding in pipe.intake(app)[1]]}
+                   for app in apps]
+        return {"applications": results,
+                "batch_findings": [{"severity": finding.severity.value, "message": finding.message}
+                                   for finding in pipe.batch_checks(apps)],
+                "audit": json.loads(pipe.audit_json())}
+
+    api.mount("/static", StaticFiles(directory=BASE / "web", check_dir=False), name="static")
+    return api
+
+
+app = create_app()
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    parser = argparse.ArgumentParser(description="啓動 GrantFlow 本機工作台")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    uvicorn.run(app, host="127.0.0.1", port=args.port, proxy_headers=False)

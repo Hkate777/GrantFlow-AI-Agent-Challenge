@@ -1,4 +1,4 @@
-"""统一数据模型：申请、文档、检查结果、评审、追踪记录。"""
+"""統一資料模型：申請、文件、審查結果、評審及追蹤記錄。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
@@ -34,13 +34,19 @@ class DocType(str, Enum):
 
 
 class FindingType(str, Enum):
-    MISSING = "missing"          # 缺失资料
-    DUPLICATE = "duplicate"      # 重复提交
-    FORMAT = "format"            # 格式问题
-    ELIGIBILITY = "eligibility"  # 资格不符
-    CONFLICT = "conflict"        # 潜在利益冲突
-    ANOMALY = "anomaly"          # 数值/内容异常
-    INCONSISTENT = "inconsistent"  # 跨源数据矛盾
+    MISSING = "missing"          # 缺少資料
+    DUPLICATE = "duplicate"      # 重複提交
+    FORMAT = "format"            # 格式問題
+    ELIGIBILITY = "eligibility"  # 資格不符
+    CONFLICT = "conflict"        # 潛在利益衝突
+    ANOMALY = "anomaly"          # 數值或內容異常
+    INCONSISTENT = "inconsistent"  # 跨來源資料矛盾
+
+
+@dataclass
+class EvidenceSpan:
+    locator: str
+    text: str
 
 
 @dataclass
@@ -51,6 +57,7 @@ class Document:
     text: str = ""
     meta: dict[str, Any] = field(default_factory=dict)
     error: Optional[str] = None
+    segments: list[EvidenceSpan] = field(default_factory=list)
 
 
 @dataclass
@@ -61,7 +68,7 @@ class Application:
     applicant: str
     email: str = ""
     team: list[str] = field(default_factory=list)
-    fields: dict[str, Any] = field(default_factory=dict)   # 结构化表单字段
+    fields: dict[str, Any] = field(default_factory=dict)   # 結構化表單欄位
     docs: list[Document] = field(default_factory=list)
 
     @staticmethod
@@ -75,14 +82,15 @@ class Finding:
     severity: Severity
     message: str
     detail: str = ""
-    source: str = ""          # 触发来源（规则名/文档名）
-    needs_human: bool = False  # 是否需人工复核
+    source: str = ""          # 規則名稱或文件名稱
+    needs_human: bool = False
+    application_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
 class ReviewScore:
     reviewer: str
-    criteria: dict[str, float]  # 维度 -> 分数
+    criteria: dict[str, float]  # 評審準則及分數
     comment: str = ""
 
     @property

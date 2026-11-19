@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-Hant-HK">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#142e2a">
+  <title>GrantFlow · 資助申請工作台</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">跳至主要內容</a>
+  <div class="shell">
+    <aside class="rail" aria-label="工作台導覽">
+      <a class="brand" href="#/cases" aria-label="GrantFlow 個案登記冊">
+        <span class="brand-mark" data-icon="brand"></span>
+        <span>
+          <span class="brand-name">GrantFlow</span>
+          <span class="brand-caption">資助申請工作台</span>
+        </span>
+      </a>
+      <nav class="rail-nav" id="queue-nav" aria-label="個案進度"></nav>
+      <div class="rail-footer">
+        <button class="rail-button" id="load-demo" type="button">
+          <span data-icon="tray"></span><span>匯入示範個案</span>
+        </button>
+      </div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <nav class="breadcrumbs" id="breadcrumbs" aria-label="所在位置"></nav>
+        <div class="top-actions">
+          <a class="button secondary" href="#/mail"><span data-icon="mail"></span>匯入電郵</a>
+          <a class="button primary" href="#/new"><span data-icon="plus"></span>新增申請</a>
+        </div>
+      </header>
+      <div class="notices" id="notices" aria-live="polite"></div>
+      <main class="content" id="workspace" tabindex="-1" aria-busy="true">
+        <h1>申請個案</h1>
+        <p class="loading-label" role="status">正在載入個案登記冊…</p>
+        <div class="skeleton" aria-hidden="true"></div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>
