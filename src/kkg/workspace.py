@@ -154,7 +154,10 @@ class Workspace:
             resolution = {**{key: resolution[key] for key in ("actor", "reason", "at")},
                           "current": bool(decision or resolution["basis"] == basis)}
         if decision:
-            decision = {key: decision[key] for key in ("actor", "reason", "outcome", "at", "rule_version")}
+            # 保留簽發時的計劃快照：歷史包與個案查閱必須對應簽發時的規則版本
+            # （審評第三輪實測：投影丟棄快照會令導出出現 V1 清單配 V2 評估）。
+            decision = {key: decision[key] for key in ("actor", "reason", "outcome", "at", "rule_version",
+                                                       "program_snapshot")}
         program = self.programs.get(app["program"])
         return {
             "id": case["id"], "app_id": app["app_id"], "program_id": app["program"], "title": app["title"],

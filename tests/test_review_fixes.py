@@ -194,3 +194,91 @@ def test_program_snapshot_roundtrip():
     rebuilt = Program.from_snapshot(asdict(program))
     assert rebuilt.rule_version == program.rule_version
     assert rebuilt.min_reviewers == program.min_reviewers
+
+
+V1_YAML = """program_id: HK-ACC-2027
+name: "計劃 V1"
+deadline: "2027-01-03"
+required_docs:
+  - { name: proposal, doc_type: any, required: true }
+  - { name: budget, doc_type: any, required: true }
+  - { name: cv, doc_type: any, required: true }
+required_fields:
+  - { key: org_type, label: 機構類型, ftype: str }
+  - { key: budget, label: 預算, ftype: number }
+  - { key: contact, label: 聯絡人, ftype: str }
+criteria:
+  - { name: "V1維度一", weight: 1, max_score: 50 }
+  - { name: "V1維度二", weight: 1, max_score: 50 }
+eligibility: { min_team: 1, max_team: 8 }
+pass_threshold: 60
+min_reviewers: 1
+"""
+
+
+def test_signed_pack_uses_sign_time_rule_version(tmp_path):
+    """P0-08（第三輪審評實測）：V1 收件、V2 覆核簽發、V3 改版並下架後，
+    導出的核對清單與評估都必須對應簽發時的 V2 規則——不得 V1 清單配 V2 評估。"""
+    import base64
+    import io
+    import zipfile
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "program_v1.yaml").write_text(V1_YAML, encoding="utf-8")
+    auth = base64.b64encode(b"demo:demo").decode()
+
+    client = TestClient(app.create_app(tmp_path / "cases.sqlite3", configs=config_dir),
+                        client=("127.0.0.1", 41000))
+    client.headers["Authorization"] = f"Basic {auth}"
+    case = client.post("/api/cases", data={"metadata": json.dumps(_metadata("VER-1"))},
+                       files=[("files", ("proposal.txt", b"requested_budget: 120000 HKD",
+                                         "text/plain")),
+                              ("files", ("budget.csv", b"item,amount\nMaterials,120000\n",
+                                         "text/csv")),
+                              ("files", ("cv.txt", b"Team lead biography.", "text/plain"))]).json()
+
+    # V2 改版：維度換名，規則版本隨之變化
+    (config_dir / "program_v1.yaml").write_text(
+        V1_YAML.replace("V1維度一", "V2準則甲").replace("V1維度二", "V2準則乙")
+               .replace('name: "計劃 V1"', 'name: "計劃 V2"'), encoding="utf-8")
+    fresh = TestClient(app.create_app(tmp_path / "cases.sqlite3", configs=config_dir),
+                       client=("127.0.0.1", 41000))
+    fresh.headers["Authorization"] = f"Basic {auth}"
+    prog = next(p for p in fresh.get("/api/programs").json() if p["program_id"] == "HK-ACC-2027")
+    criteria = {item["name"]: item["max_score"] for item in prog["criteria"]}
+    detail = fresh.get(f"/api/cases/{case['id']}").json()
+    fresh.put(f"/api/cases/{case['id']}/scores", json={
+        "revision": detail["revision"],
+        "scores": [{"reviewer": "Reviewer A", "criteria": criteria, "comment": "ok."}]})
+    # 規則改版 → 強制人工覆核後方可簽發
+    fresh.post(f"/api/cases/{case['id']}/resolution", json={
+        "revision": fresh.get(f"/api/cases/{case['id']}").json()["revision"],
+        "actor": "主管", "reason": "規則改版覆核完成，按 V2 維度評分。"})
+    sign = fresh.post(f"/api/cases/{case['id']}/decision", json={
+        "revision": fresh.get(f"/api/cases/{case['id']}").json()["revision"],
+        "actor": "主管", "reason": "V2 通過", "outcome": "approved"})
+    assert sign.status_code == 200, sign.text
+    assert sign.json()["rule_version"].startswith(next(
+        p["rule_version"][:4] for p in fresh.get("/api/programs").json()
+        if p["program_id"] == "HK-ACC-2027"))
+
+    # V3 改版並下架該計劃配置
+    (config_dir / "program_v1.yaml").write_text(
+        V1_YAML.replace("V1維度一", "V3準則壹").replace("V1維度二", "V3準則貳"), encoding="utf-8")
+    (config_dir / "program_v1.yaml").unlink()
+    (config_dir / "other.yaml").write_text(
+        "program_id: OTHER-1\nname: 其他計劃\npass_threshold: 60\nmin_reviewers: 1\n"
+        "criteria:\n  - { name: X, weight: 1, max_score: 10 }\n", encoding="utf-8")
+    final = TestClient(app.create_app(tmp_path / "cases.sqlite3", configs=config_dir),
+                       client=("127.0.0.1", 41000))
+    final.headers["Authorization"] = f"Basic {auth}"
+
+    pack = final.get(f"/api/cases/{case['id']}/pack")
+    assert pack.status_code == 200, pack.text
+    with zipfile.ZipFile(io.BytesIO(pack.content)) as archive:
+        checklist = archive.read("checklist.md").decode("utf-8")
+        review = json.loads(archive.read("review.json").decode("utf-8"))
+    assert "V2準則甲" in checklist and "V2準則乙" in checklist
+    assert "V1維度" not in checklist
+    assert review["weighted_total"] is not None
