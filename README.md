@@ -16,7 +16,7 @@ GrantFlow面向大學、科技園、創投機構及創新創業支援單位，�
 - **評審彙總**：按維度權重計算加權總分，自動識別評分分歧並觸發複議建議，生成結果通知與後續待辦
 - **項目追蹤**：里程碑、資助發放、定期報告跟蹤，逾期/臨期自動預警，輸出管理報告
 - **全程可審計**：每個Agent動作寫入審計日誌，關鍵節點標記為需人工複核
-- **多地區審查**：內置13個地區（香港、台灣、內地、新加坡、美國、英國、澳洲、加拿大、阿聯酋、沙特、馬來西亞、泰國、埃及），Agent按地區載入語言字形、當地法規、貨幣格式及評審慣例；法規依據真實法律（UK GDPR、Privacy Act 1988、PIPEDA、PDPL、Law 151/2020 等）
+- **多地區審查**：內置15個地區（中國香港、中國台灣、中國內地、新加坡、美國、英國、澳洲、加拿大、日本、韓國、阿聯酋、沙特、馬來西亞、泰國、埃及），Agent按地區載入語言字形、當地法規、貨幣格式及評審慣例；法規依據真實法律（UK GDPR、Privacy Act 1988、PIPEDA、PDPL、Law 151/2020 等）
 - **私隱與商業敏感防護**：送模型前先去識別化，電郵、電話、身份證、銀行卡、合約編號等以不可逆佔位符取代，原始值不離開本機；對外評審包、Excel總表與審計日誌均無明文敏感資訊
 - **多模型可插拔**：Mock離線可復現，亦支持 OpenAI 兼容端點、Anthropic Claude、Google Gemini；`--llm auto` 按已配置的API Key自動選擇，無密鑰時優雅降級
 
@@ -25,7 +25,7 @@ GrantFlow面向大學、科技園、創投機構及創新創業支援單位，�
 項目展示以香港繁體及英文為主。README、docs、註解、提交訊息、示範數據及測試斷言一律使用繁體中文（香港慣用字）或英文，不出現簡體中文。`configs/regions/` 內的地區配置除外，那些是Agent用來處理多語言申請的資料：
 
 - 文件、註解、提交訊息、示範數據、測試斷言均須遵守；
-- **繁體必須符合香港慣用術語或香港書面語，不得使用台灣慣用語、大陸書面語或直接以簡體逐字轉繁的產物**；有疑問時以香港政府、香港教育局及本地傳媒的用字習慣為準；
+- **繁體必須符合香港慣用術語或香港書面語，不得使用台灣地區慣用語、內地書面語或直接以簡體逐字轉繁的產物**；有疑問時以香港政府、香港教育局及本地傳媒的用字習慣為準；
 - 香港標準詞彙對照（左側禁用，右側為推薦寫法）：
 
   | 禁用（非香港標準） | 香港慣用寫法 |
@@ -86,7 +86,9 @@ python cli.py --llm auto
 按地區審查（Agent會載入當地語言字形、法規、格式及評審慣例）：
 
 ```bash
-python cli.py --region HK    # 香港（繁體／英文）
+python cli.py --region HK    # 中國香港（繁體／英文，個人資料私隱條例）
+python cli.py --region JP    # 日本（APPI／個人情報保護法）
+python cli.py --region KR    # 韓國（PIPA／個人情報保護法）
 python cli.py --region GB    # 英國（英文，UK GDPR／Data Protection Act）
 python cli.py --region AU    # 澳洲（英文，Privacy Act 1988／APP）
 python cli.py --region AE    # 阿聯酋（PDPL 2021年第45號聯邦法令）
@@ -95,7 +97,7 @@ python cli.py --region EG    # 埃及（Law No.151/2020）
 python cli.py --region CN    # 中國內地（簡體，個人信息保護法／數據安全法）
 ```
 
-共13個地區，完整清單見 `configs/regions/`。Web面板亦有地區下拉選單；新增地區只需加入一份yaml。選地依據及法規對照見 `docs/architecture.md`。
+共15個地區，完整清單見 `configs/regions/`。Web面板亦有地區下拉選單；新增地區只需加入一份yaml。選地依據及法規對照見 `docs/architecture.md`。
 
 ## 架構
 
@@ -122,7 +124,7 @@ flowchart LR
 │   └── banner.svg              # 倉庫封面橫幅
 ├── configs/
 │   ├── program_demo.yaml       # 示範計劃規則（聲明式配置）
-│   └── regions/                # 13個地區資料（HK/TW/CN/SG/US/GB/AU/CA/AE/SA/MY/TH/EG）
+│   └── regions/                # 15個地區資料（HK/TW/CN/SG/US/GB/AU/JP/KR/CA/AE/SA/MY/TH/EG）
 ├── data/demo/                  # 3 份示範申請（含異常用例）+ 評審評分
 ├── src/kkg/                    # 核心包
 │   ├── ingest.py               # 多格式文檔攝取（可選依賴、優雅降級）

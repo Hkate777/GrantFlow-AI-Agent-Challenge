@@ -1,0 +1,18 @@
+code: JP
+name: 日本
+languages: [ja, en]
+script: hant
+locale_terms:
+  網絡: ネットワーク
+  軟件: ソフトウェア
+  資訊: 情報
+legal_keywords:
+  - APPI
+  - 個人情報保護法
+  - personal data
+date_formats: ["YYYY年MM月DD日", "YYYY-MM-DD"]
+currency: JPY
+review_conventions:
+  - 申請可以英文或日文提交；日文文件採漢字與假名混寫
+  - 須說明個人資料處理符合個人情報保護法(APPI)及個人情報保護委員會(PPC)要求
+  - 重視技術嚴謹度、細節與品質管理

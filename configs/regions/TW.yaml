@@ -1,5 +1,5 @@
 code: TW
-name: 台灣
+name: 中國台灣
 languages: [zh-Hant]
 script: hant
 locale_terms:
@@ -16,4 +16,4 @@ currency: NT$
 review_conventions:
   - 補助計劃重視在地產業連結與學研合作
   - 須說明個人資料蒐集與利用符合當地法規
-  - 用字採臺灣繁體習慣
+  - 用字採當地繁體習慣

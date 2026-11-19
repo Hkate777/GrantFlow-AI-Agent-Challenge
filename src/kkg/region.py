@@ -51,8 +51,8 @@ def detect_script(text: str) -> str:
 
     以一組差異字取樣，適合文件級別的判斷，不追求語言學精度。
     """
-    hant_markers = "體臺灣網絡資料軟件資訊與對於為這個們時後點嗎麼"
-    hans_markers = "体台湾网络资料软件信息与对于为这个们时后点吗么"
+    hant_markers = "體網絡資料軟件資訊與對於為這個們時後點嗎麼"
+    hans_markers = "体网络资料软件信息与对于为这个们时后点吗么"
     cjk = [c for c in text if "\u4e00" <= c <= "\u9fff"]
     if not cjk:
         return "latin"

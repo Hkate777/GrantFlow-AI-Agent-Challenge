@@ -24,7 +24,7 @@
   <text x="56" y="258" fill="#8fbfc9" font-family="'Noto Sans HK','PingFang SC','Microsoft YaHei',sans-serif" font-size="18">受理 · 審查 · 交叉驗證 · 評審彙總 · 結果通知 · 項目追蹤　|　KK_Garden</text>
   <g font-family="'Noto Sans HK','PingFang SC','Microsoft YaHei',sans-serif" font-size="17" fill="#0b1e3a" font-weight="600">
     <rect x="860" y="60" width="150" height="38" rx="19" fill="#4fd1c5"/>
-    <text x="935" y="85" text-anchor="middle">13 個地區</text>
+    <text x="935" y="85" text-anchor="middle">15 個地區</text>
     <rect x="1022" y="60" width="130" height="38" rx="19" fill="#7cc4ff"/>
     <text x="1087" y="85" text-anchor="middle">多模型接入</text>
     <rect x="896" y="110" width="200" height="38" rx="19" fill="#ffffff" opacity="0.92"/>

@@ -104,7 +104,7 @@ def test_pipeline_region_in_extracted():
 def test_all_region_configs_load():
     from kkg.region import Region
     regions = Region.load_all(BASE / 'configs' / 'regions')
-    expected = {'HK', 'TW', 'CN', 'SG', 'US', 'GB', 'AU', 'AE', 'SA', 'MY', 'TH', 'CA', 'EG'}
+    expected = {'HK', 'TW', 'CN', 'SG', 'US', 'GB', 'AU', 'AE', 'SA', 'MY', 'TH', 'CA', 'EG', 'JP', 'KR'}
     assert set(regions) == expected
     for code, r in regions.items():
         assert r.code == code
