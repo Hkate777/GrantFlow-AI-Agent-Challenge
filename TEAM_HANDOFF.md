@@ -20,9 +20,11 @@ GrantFlow 對應「智賦香江」場景 ⑯「申請評審與項目管理流程
 | 語言檢查 | 通過（OpenCC `s2hk` 警告模式；`data/demo` 舊簡體輸入已豁免） |
 | Web 冒煙 | `/`、`app.js`、`styles.css`、`/api/program`、`/api/regions`、`/api/cases` 全 200 |
 | 兩線整合 | **已完成**：Web 工作台線 + 多地區/隱私/導出線合併（見 §2） |
+| 乾淨安裝 | 隔離 venv 只裝 `requirements.txt` → **83/83**（已補 `httpx`/`python-multipart`，CI 恢復綠燈） |
 | 實測缺陷 | **4 個已修**（截止時間/評委人數/歷史包導出/列表分頁，見 §4） |
 | 未合併 | 整合分支尚未併回 `main`（待隊友 PR 審查）；`main` 已打 `v1.0.0` tag |
 | 人工驗收 | 完整瀏覽器流程、真實 OCR、機構資料、人工工時基線仍待驗收 |
+| 第二輪審評 | P0-01/02/03/04/05 的代碼項已修（依賴鎖定、演示入口、統一評估口徑、簽發快照、自報日期移除），提交 `6f559ed`；P0-06 起的身份授權與 P0-10/11 剩餘項待隊友認領 |
 
 ---
 
@@ -103,7 +105,7 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 2. **assess 的 holds 順序即狀態語義**：`pending_deliberation → needs_materials → needs_compliance → invalid_scores → pending_scores → insufficient_reviews → needs_review`；`status = holds[0]`。調整順序會改變個案首選狀態與測試。
 3. **`get_llm('auto')` 恆回本地 MockLLM**：外部模型須顯式指定 kind 且環境有密鑰。這是受控模型端點策略（審評 P2-04）——Web 預設不出境。
 4. **計劃快照隨案**：`case["program_snapshot"]` 是歷史個案可查閱/匯出的依據；`Program.from_snapshot` 會重建嵌套 dataclass。改 `Program` 欄位時同步維護快照兼容。
-5. **`min_reviewers` 默認 1**：demo 計劃未設（保持演示流暢）；受控計劃請在 YAML 設 `min_reviewers: 2`（參考 `configs/campus_pilot.yaml` 的定位）。
+5. **`min_reviewers` 兩個內置計劃均已設 2**：新建計劃 YAML 亦應設定（低於人數產生 `insufficient_reviews` hold，簽發被擋）。簽發時 decision 內保存 `program_snapshot` 鎖定規則版本——歷史包對應簽發時規則，避免「舊結果配新維度」。
 6. **舊簡體輸入是語義夾具**：`data/demo/applications/app002`（簡體附件 vs 繁體表單 = 跨源矛盾發現的來源）與 `reviews_demo.json`（簡體 criteria 鍵兼容）**不得轉繁**；語言檢查的豁免清單/警告模式即為此服務。
 
 ---
