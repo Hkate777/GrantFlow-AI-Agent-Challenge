@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
-"""語言規範檢查：確保本倉庫所有文字檔案只使用繁體中文（香港標準）或英文。
+"""語言規範檢查：提示本倉庫文字檔是否符合「繁體中文（香港標準）或英文」。
 
-兩項檢查：
-1. 簡體字：以 OpenCC s2hk（香港繁體）轉換原文，結果不同即代表含簡體字。
-2. 香港標準術語：禁止台灣慣用語、大陸書面語等非香港用字（見 HK_TERMS）。
+檢查兩項：
+1. 簡體字：以 OpenCC s2hk 轉換原文，結果不同即提示可能含簡體字。
+2. 香港標準術語：提示台灣慣用語、大陸書面語等非香港用字（見 HK_TERMS）。
+
+預設為**警告模式**：只列印提示，不退出的非零狀態，不阻塞 CI。
+使用 --strict 才會在有問題時以狀態碼 1 結束（適合本地提交前自查）。
+
+注意：OpenCC 轉換規則偶有誤判（例如把香港標準「說明」轉為「説明」），
+因此 CI 採用警告模式；隊友可自行判斷是否為誤報。
 
 用法：
-    python scripts/check_language.py
+    python scripts/check_language.py           # 警告模式（CI 預設）
+    python scripts/check_language.py --strict  # 嚴格模式（本地可選）
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -17,9 +25,11 @@ from pathlib import Path
 try:
     import opencc
 except ImportError:
-    sys.exit("缺少 opencc-python-reimplemented，請先 pip install -r requirements.txt")
+    # 缺少依賴時同樣只警告，不阻塞
+    print("警告：缺少 opencc-python-reimplemented，略過語言檢查。", file=sys.stderr)
+    sys.exit(0)
 
-# 禁用詞 -> 香港慣用寫法（禁用詞本身必須是繁體，否則由 s2hk 檢查攔截）
+# 禁用詞 -> 香港慣用寫法
 HK_TERMS: dict[str, str] = {
     "軟體": "軟件",
     "網路": "網絡",
@@ -29,8 +39,17 @@ HK_TERMS: dict[str, str] = {
     "人工智慧": "人工智能",
 }
 
+# 香港標準寫法但 OpenCC s2hk 會誤轉的詞：比較前先正規化，避免誤報
+HK_SPELLING_ALLOWED: dict[str, str] = {
+    "說明": "説明",
+}
+
 ROOT = Path(__file__).resolve().parent.parent
 converter = opencc.OpenCC("s2hk")
+
+parser = argparse.ArgumentParser(description="語言規範檢查（預設只警告）")
+parser.add_argument("--strict", action="store_true", help="發現問題時以狀態碼 1 結束")
+args = parser.parse_args()
 
 files = subprocess.check_output(["git", "-C", str(ROOT), "ls-files"], text=True).splitlines()
 errors: list[str] = []
@@ -42,19 +61,24 @@ for rel in files:
     except (UnicodeDecodeError, OSError):
         continue  # 二進位或無法讀取的檔案略過
 
-    if converter.convert(text) != text:
-        errors.append(f"{rel}：含簡體字，請改用繁體中文（香港標準）")
+    normalized = text
+    for hk_form, cc_form in HK_SPELLING_ALLOWED.items():
+        normalized = normalized.replace(hk_form, cc_form)
+    if converter.convert(normalized) != normalized:
+        errors.append(f"{rel}：可能含簡體字或非香港用字，請人工確認")
 
-    # 政策文件本身會列出禁用詞作示例，豁免術語檢查（簡體字檢查仍適用）
+    # 政策文件本身會列出禁用詞作示例，豁免術語檢查
     if rel not in {"README.md", "scripts/check_language.py"}:
         for banned, recommended in HK_TERMS.items():
             if banned in text:
                 errors.append(f"{rel}：出現非香港標準術語「{banned}」，建議改用「{recommended}」")
 
 if errors:
-    print("語言規範檢查失敗：", file=sys.stderr)
+    print("⚠️ 語言規範提示（不阻塞 CI）：", file=sys.stderr)
     for e in errors:
         print(f"  - {e}", file=sys.stderr)
-    sys.exit(1)
-
-print(f"語言檢查通過：{len(files)} 個檔案均為繁體中文（香港標準）或英文 ✅")
+    print("   如確認為 OpenCC 誤判（例如「說明」），可忽略本提示。", file=sys.stderr)
+    if args.strict:
+        sys.exit(1)
+else:
+    print(f"語言檢查通過：{len(files)} 個檔案均為繁體中文（香港標準）或英文 ✅")

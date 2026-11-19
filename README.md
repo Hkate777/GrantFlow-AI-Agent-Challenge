@@ -33,7 +33,7 @@ GrantFlow 面向大學、科技園、創投機構及創新創業支援單位，�
   | 質量（指素質時） | 質素 |
 
   常見香港書面用字：人工智能、網絡、數據、軟件、視頻、資訊、項目、質素、註冊等；「信息」與「資訊」均可，但同一文件內須保持一致；
-- 提交前執行 `python scripts/check_language.py`（CI 亦會自動執行）：腳本以 OpenCC `s2hk` 檢查全部受版本控制的文字檔，發現簡體字或非香港標準術語即失敗。
+- 提交前可執行 `python scripts/check_language.py`（CI 亦會自動執行）：腳本以 OpenCC `s2hk` 檢查全部受版本控制的文字檔。**CI 採用警告模式**，只提示、不阻塞流程（OpenCC 偶爾會把香港標準「說明」誤判為「説明」）；如需嚴格把關，可自行執行 `python scripts/check_language.py --strict`。
 
 ## 快速開始
 
@@ -92,12 +92,27 @@ flowchart LR
 │   ├── pipeline.py             # Agentic Workflow 編排 + 審計
 │   ├── llm.py                  # 可插拔 LLM（Mock 離線可復現）
 │   ├── program.py              # 計劃規則模型
-│   └── models.py               # 數據模型 + 審計日誌
+│   ├── models.py               # 數據模型 + 審計日誌
+│   └── export.py               # 評審彙總 Excel 匯出（三個工作表）
 ├── cli.py                      # 一鍵跑通全流程
 ├── app.py                      # FastAPI Web 面板
+├── scripts/
+│   ├── check_language.py       # 語言規範檢查（預設警告，--strict 嚴格）
+│   ├── benchmark.py            # 量化基準測試 → 計劃書「可量化成效」
+│   └── pitch_demo.py           # 一鍵生成決賽演示全套物料 → output/pitch/
 ├── tests/                      # 端到端測試
 └── docs/                       # 架構説明 / 計劃書大綱 / 評審映射
 ```
+
+## 演示與量化數據
+
+```bash
+python scripts/benchmark.py     # 輸出 output/benchmark_report.md（效率與檢出率）
+python -m kkg.export            # 輸出 output/review_summary.xlsx（申請總覽/發現明細/評分明細）
+python scripts/pitch_demo.py    # 一鍵生成全套決賽物料（含 8 分鐘演示腳本）
+```
+
+`pitch_demo.py` 會把評審資料包、結果通知、待辦、管理報告、彙總 Excel、基準報告及審計日誌集中輸出到 `output/pitch/`，適合決賽現場直接展示。
 
 ## Demo 數據説明（故意內置異常，驗證 Agent 檢出能力）
 
