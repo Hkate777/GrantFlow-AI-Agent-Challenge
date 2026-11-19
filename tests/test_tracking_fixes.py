@@ -1,4 +1,5 @@
 """P0-11 回歸：台帳寫入的額度上限、未來日期攔截與保存往返保真。"""
+import base64
 import json
 from pathlib import Path
 
@@ -9,7 +10,10 @@ import app
 
 
 def _client(path):
-    return TestClient(app.create_app(path), client=("127.0.0.1", 41000))
+    # P0-06：所有 /api 需認證——測試默認以演示賬號 demo/demo 走 HTTP Basic。
+    client = TestClient(app.create_app(path), client=("127.0.0.1", 41000))
+    client.headers["Authorization"] = "Basic " + base64.b64encode(b"demo:demo").decode()
+    return client
 
 
 def _metadata(app_id="TRACK-1"):

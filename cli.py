@@ -120,7 +120,10 @@ def main() -> None:
     review_dir.mkdir(exist_ok=True)
     print("[5/6] 評審彙總：")
     for a in apps:
-        agg = pipe.review(a, reviews.get(a.app_id, []), findings=findings[a.app_id])
+        # 評估併入批次發現（Finding 物件），草稿狀態與工作台一致。
+        case_findings = findings[a.app_id] + [
+            f for f in batch_fd if a.app_id in (getattr(f, "application_ids", []) or [])]
+        agg = pipe.review(a, reviews.get(a.app_id, []), findings=case_findings)
         # 正式通知須人工簽發（notice 為 None）；此處寫出評審進度草稿。
         (review_dir / f"{a.app_id}_draft.md").write_text(
             review_draft(a.app_id, a.title, agg), encoding="utf-8")

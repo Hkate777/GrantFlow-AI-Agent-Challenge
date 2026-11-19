@@ -23,7 +23,7 @@ from .llm import get_llm                                   # noqa: E402
 from .models import Finding, ReviewScore                   # noqa: E402
 from .pipeline import Pipeline, load_applications           # noqa: E402
 from .program import Program                                # noqa: E402
-from .review import STATUS_LABELS, assess, aggregate        # noqa: E402
+from .review import STATUS_LABELS, _label, aggregate, assess  # noqa: E402
 
 HEADER_FILL = PatternFill("solid", fgColor="1F4E79")
 HEADER_FONT = Font(bold=True, color="FFFFFF")
@@ -88,8 +88,9 @@ def export_workbook(prog: Program, apps: list, findings: dict[str, list[Finding]
         rows = scores.get(a.app_id, [])
         per_reviewer = aggregate(rows, prog).get("per_reviewer_weighted", {})
         for s in rows:
+            normalized = {_label(k): v for k, v in s.criteria.items()}
             ws3.append([a.app_id, _mask(s.reviewer)] +
-                       [s.criteria.get(k, 0) for k in criteria] +
+                       [normalized.get(_label(k), 0) for k in criteria] +
                        [per_reviewer.get(s.reviewer, "-"), _mask(s.comment)])
     ws3.freeze_panes = "A2"
     for col in "ABCDEFGH":

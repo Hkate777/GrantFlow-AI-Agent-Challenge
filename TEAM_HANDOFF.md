@@ -21,10 +21,11 @@ GrantFlow 對應「智賦香江」場景 ⑯「申請評審與項目管理流程
 | Web 冒煙 | `/`、`app.js`、`styles.css`、`/api/program`、`/api/regions`、`/api/cases` 全 200 |
 | 兩線整合 | **已完成**：Web 工作台線 + 多地區/隱私/導出線合併（見 §2） |
 | 乾淨安裝 | 隔離 venv 只裝 `requirements.txt` → **83/83**（已補 `httpx`/`python-multipart`，CI 恢復綠燈） |
+| 身份認證 | **P0-06 已落地**：所有 /api 需 HTTP Basic（初始 admin 口令見啟動日誌，演示賬號 demo/demo）；審計事件綁服務端身份，前端自填 actor 已忽略；停用即時生效（`GET /api/auth/me` 驗證） |
 | 實測缺陷 | **4 個已修**（截止時間/評委人數/歷史包導出/列表分頁，見 §4） |
 | 未合併 | 整合分支尚未併回 `main`（待隊友 PR 審查）；`main` 已打 `v1.0.0` tag |
 | 人工驗收 | 完整瀏覽器流程、真實 OCR、機構資料、人工工時基線仍待驗收 |
-| 第二輪審評 | P0-01/02/03/04/05/**11** 的代碼項已修（依賴鎖定、演示入口、統一評估口徑、簽發快照、自報日期移除、**台帳額度/未來日期/往返保真**），提交 `6f559ed`+`d0240fe`；P0-06 起的身份授權與 P0-10 剩餘項待隊友認領 |
+| 第二輪審評 | P0-01/02/03/04/05/**06**/**11** 的代碼項已修：依賴鎖定、演示入口、統一評估口徑、簽發快照、自報日期移除、台帳額度/未來日期/往返保真、**本地賬號+HTTP Basic 認證+服務端操作者+停用即時生效**（`auth.py`，提交 `4062060`）；P0-10 剩餘項與 P0-07 授權矩陣待隊友認領 |
 
 ---
 
@@ -65,6 +66,7 @@ python -m pytest tests -q                     # 應 83/83
 # Web 工作台（獨立臨時 DB）
 $env:GRANTFLOW_DB = Join-Path ([IO.Path]::GetTempPath()) ('grantflow-' + [guid]::NewGuid() + '.sqlite3')
 python app.py --port 8000                     # http://127.0.0.1:8000
+                                              # 首次啟動自動建 admin/demo 賬號；瀏覽器彈出登入框輸入 demo/demo
 
 # CLI（多地區 + 多模型）
 python cli.py --llm mock --region HK --out <臨時目錄>

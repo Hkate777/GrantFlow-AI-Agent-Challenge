@@ -1,3 +1,4 @@
+import base64
 import json
 from email.message import EmailMessage
 
@@ -7,7 +8,10 @@ import app
 
 
 def _client(path):
-    return TestClient(app.create_app(path), client=("127.0.0.1", 41000))
+    # P0-06：所有 /api 需認證——測試默認以演示賬號 demo/demo 走 HTTP Basic。
+    client = TestClient(app.create_app(path), client=("127.0.0.1", 41000))
+    client.headers["Authorization"] = "Basic " + base64.b64encode(b"demo:demo").decode()
+    return client
 
 
 def _metadata(app_id="PORTAL-1", program="HK-ACC-2027"):
@@ -114,7 +118,9 @@ def test_manual_approval_and_project_survive_restart(tmp_path):
         saved = client.get(url).json()
         assert saved["project"]["funding"] == {"scheduled": 5000, "paid": 1500}
         assert any("Monthly report" in warning for warning in saved["project"]["alerts"])
-        assert saved["audit"][-1]["actor"] == "Officer"
+        # P0-06：審計事件綁定服務端身份；前端自填的 actor 不再作為審計證據。
+        assert saved["audit"][-1]["actor"] == "本機演示員"
+        assert saved["audit"][-1]["actor"] != "Officer"
         assert client.get(url + "/report").status_code == 200
 
 

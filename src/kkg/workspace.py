@@ -75,7 +75,7 @@ class Workspace:
         return extracted
 
     def _new_case(self, app: Application, channel: str, digest: str,
-                  scores: list[ReviewScore] | None = None) -> dict:
+                  scores: list[ReviewScore] | None = None, *, actor: str | None = None) -> dict:
         program = self.program(app.program)
         case = {
             "id": uuid.uuid4().hex, "application": asdict(app), "channel": channel,
@@ -85,7 +85,9 @@ class Workspace:
             "scores": [asdict(score) for score in scores or []], "resolution": None, "decision": None,
             "project": {"milestones": [], "periodic_reports": [], "disbursements": []}, "audit": [],
         }
-        _event(case, "received", "系統", f"{app.app_id} · {channel} · {app.program}@{program.rule_version}")
+        # 收件事件綁定服務端提交者身份（P0-06）；本機/歷史路徑無身份時記「系統」。
+        _event(case, "received", actor or "系統",
+               f"{app.app_id} · {channel} · {app.program}@{program.rule_version}")
         return case
 
     def _batch_findings(self, records: list[dict]) -> dict[tuple[str, str], list[Finding]]:
@@ -152,7 +154,10 @@ class Workspace:
             resolution = {**{key: resolution[key] for key in ("actor", "reason", "at")},
                           "current": bool(decision or resolution["basis"] == basis)}
         if decision:
-            decision = {key: decision[key] for key in ("actor", "reason", "outcome", "at", "rule_version")}
+            # 保留簽發時的計劃快照：歷史包與個案查閱必須對應簽發時的規則版本
+            # （審評第三輪實測：投影丟棄快照會令導出出現 V1 清單配 V2 評估）。
+            decision = {key: decision[key] for key in ("actor", "reason", "outcome", "at", "rule_version",
+                                                       "program_snapshot")}
         program = self.programs.get(app["program"])
         return {
             "id": case["id"], "app_id": app["app_id"], "program_id": app["program"], "title": app["title"],
@@ -194,7 +199,8 @@ class Workspace:
             records = self.store.list(connection, case["application"]["program"])
         return self._view(case, self._batch_findings(records)), _application(case)
 
-    def submit(self, metadata: dict, files: list[tuple[str, bytes]], channel: str) -> dict:
+    def submit(self, metadata: dict, files: list[tuple[str, bytes]], channel: str,
+               *, actor: str | None = None) -> dict:
         digest = fingerprint(metadata, files)
         app = application_from(metadata, [], fallback_id=f"APP-{digest[:12].upper()}", require_identity=True)
         self.program(app.program)
@@ -205,7 +211,7 @@ class Workspace:
                 raise WorkspaceConflict("此計劃已有相同申請編號，請在現有個案補交或更正。")
             return self.get(previous["id"])[0]
         app.docs = parse_attachments(files)
-        case = self._new_case(app, channel, digest)
+        case = self._new_case(app, channel, digest, actor=actor)
         with self.store.transaction(write=True) as connection:
             previous = self.store.find(connection, app.program, app.app_id)
             if previous is None:
