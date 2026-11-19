@@ -99,3 +99,26 @@ def test_pipeline_region_in_extracted():
     extracted, findings = pipe.intake(app)
     assert extracted['_region'] == '香港'
     assert any(f.source == 'region.legal' for f in findings)
+
+
+def test_all_region_configs_load():
+    from kkg.region import Region
+    regions = Region.load_all(BASE / 'configs' / 'regions')
+    expected = {'HK', 'TW', 'CN', 'SG', 'US', 'GB', 'AU', 'AE', 'SA', 'MY', 'TH', 'CA', 'EG'}
+    assert set(regions) == expected
+    for code, r in regions.items():
+        assert r.code == code
+        assert r.currency and r.legal_keywords, code
+
+
+def test_new_regions_legal_keywords():
+    from kkg.check import check_region
+    from kkg.region import Region
+    _, _, apps = _setup()
+    app = apps[0]
+    # 英文地區：示範申請未含當地法規關鍵詞，應觸發合規提示
+    for code, kw in [('GB', 'UK GDPR'), ('AU', 'Privacy Act'),
+                     ('AE', 'PDPL'), ('CA', 'PIPEDA')]:
+        r = Region.load(BASE / 'configs' / 'regions' / f'{code}.yaml')
+        findings = check_region(app, r)
+        assert any(kw in f.message for f in findings), (code, kw)

@@ -1,0 +1,15 @@
+code: AE
+name: 阿拉伯聯合酋長國
+languages: [ar, en]
+script: latin
+locale_terms: {}
+legal_keywords:
+  - PDPL
+  - personal data
+  - data protection
+date_formats: ["DD/MM/YYYY", "YYYY-MM-DD"]
+currency: AED
+review_conventions:
+  - 英文為主要申請語言，阿拉伯文文件一併接受
+  - 須符合聯邦個人資料保護法(PDPL)
+  - 重視與 Visit Dubai、國家願景等戰略的對接

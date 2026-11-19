@@ -17,7 +17,7 @@ import yaml
 
 @dataclass
 class Region:
-    code: str                                  # HK / TW / CN / SG / US
+    code: str                                  # 地區代碼，如 HK / GB / AU / AE，見 configs/regions/
     name: str
     languages: list[str] = field(default_factory=list)   # 優先語言，例如 ["zh-Hant", "en"]
     script: str = "hant"                       # hant / hans / latin

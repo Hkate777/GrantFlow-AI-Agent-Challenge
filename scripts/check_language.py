@@ -69,6 +69,9 @@ for rel in files:
     # 地區配置為多語言資料，豁免簡體檢查
     if rel.startswith("configs/regions/"):
         continue
+    # region.py 的字形檢測邏輯必須同時包含簡體與繁體樣本常量，豁免簡體檢查
+    if rel == "src/kkg/region.py":
+        continue
     if converter.convert(normalized) != normalized:
         errors.append(f"{rel}：可能含簡體字或非香港用字，請人工確認")
 
