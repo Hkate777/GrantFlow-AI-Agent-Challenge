@@ -1,13 +1,13 @@
-"""Agentic Workflow 编排：把各子 Agent 串成端到端流程，全程记录审计日志。
+"""Agentic Workflow編排：把各子Agent串成端到端流程，全程記錄審計日誌。
 
-流程（对应场景 16 功能要求）：
-  ingest   → 收集多渠道提交资料与附件，解析多格式文档
-  extract  → 结构化抽取关键信息（LLM，Mock 可离线复现）
-  check    → 完整性 / 格式 / 资格 / 利益冲突 / 预算审查
-  verify   → 跨源交叉验证 + 跨申请查重 + 预算异常检测
-  summarize→ 标准化摘要、一页式简介、评审资料包
-  review   → 汇总评分评语、识别分歧、生成结果通知与待办
-  track    → 里程碑 / 资助发放 / 定期报告追踪 + 预警 + 管理报告
+流程（對應場景16功能要求）：
+  ingest至 收集多渠道提交資料與附件，解析多格式文檔
+  extract至 結構化抽取關鍵信息（LLM，Mock可離線復現）
+  check至 完整性 / 格式 / 資格 / 利益衝突 / 預算審查
+  verify至 跨源交叉驗證 + 跨申請查重 + 預算異常檢測
+  summarize至 標準化摘要、一頁式簡介、評審資料包
+  review至 彙總評分評語、識別分歧、生成結果通知與待辦
+  track至 里程碑 / 資助發放 / 定期報告追蹤 + 預警 + 管理報告
 """
 from __future__ import annotations
 
@@ -19,7 +19,9 @@ from .extract import anomaly_scan, cross_verify, extract_fields
 from .ingest import ingest_dir
 from .llm import LLM, get_llm
 from .models import Application, AuditTrail, Finding, Milestone, ReviewScore
+from .privacy import Redactor
 from .program import Program
+from .region import Region
 from .review import aggregate, followup_todos, result_notice
 from .summarize import reviewer_pack
 from .track import management_report
@@ -27,43 +29,76 @@ from .track import management_report
 
 class Pipeline:
     def __init__(self, program: Program, llm: LLM | None = None,
-                 pass_threshold: float = 60.0) -> None:
+                 pass_threshold: float = 60.0, region: Region | None = None,
+                 privacy: bool = True) -> None:
         self.prog = program
         self.llm = llm or get_llm("auto")
         self.pass_threshold = pass_threshold
+        self.region = region
+        self.privacy = privacy
+        self.redactor = Redactor() if privacy else None
         self.audit = AuditTrail()
 
-    # ---------- 阶段 1：受理与审查 ----------
+    # ---------- 階段 1：受理與審查 ----------
     def intake(self, app: Application) -> tuple[dict, list[Finding]]:
         self.audit.log("intake", "start", f"{app.app_id} {app.title}")
-        extracted = extract_fields(app, self.llm)
+
+        # 私隱防護：送LLM前先去識別化，原始敏感值不離開本機；
+        # 抽取結果再於本機還原，讓後續交叉驗證邏輯不受影響。
+        if self.redactor:
+            safe_app = self.redactor.safe_view(app)
+            extracted = extract_fields(safe_app, self.llm)
+            extracted = {k: (self.redactor.restore(v) if isinstance(v, str) else v)
+                         for k, v in extracted.items()}
+            self.audit.log("privacy", "redacted", self.redactor.report.summary())
+        else:
+            extracted = extract_fields(app, self.llm)
+
         extracted["_program_name"] = self.prog.name
         extracted["_criteria_hint"] = " / ".join(c.name for c in self.prog.criteria)
         self.audit.log("extract", "fields", f"keys={list(extracted)}")
 
         findings = check_completeness(app, self.prog)
         findings += cross_verify(app, extracted)
+        if self.region:
+            from .check import check_region
+            findings += check_region(app, self.region)
+            extracted["_region"] = self.region.name
+            extracted["_region_conventions"] = self.region.review_conventions
+            self.audit.log("region", "applied", self.region.code)
         self.audit.log("check", "done", f"findings={len(findings)}")
         return extracted, findings
 
-    # ---------- 阶段 2：批次级检查 ----------
+    # ---------- 階段 2：批次級檢查 ----------
     def batch_checks(self, apps: list[Application]) -> list[Finding]:
         findings = detect_duplicates(apps) + anomaly_scan(apps)
         self.audit.log("batch", "done", f"findings={len(findings)}")
         return findings
 
-    # ---------- 阶段 3：生成评审资料包 ----------
+    # ---------- 階段 3：生成評審資料包 ----------
     def build_packs(self, apps: list[Application], extracts: dict[str, dict],
                     all_findings: dict[str, list[Finding]], out_dir: str | Path) -> dict[str, str]:
+        from dataclasses import replace
+        from .summarize import reviewer_pack
+
         paths = {}
         for a in apps:
-            pack = reviewer_pack(a, self.prog, extracts[a.app_id],
-                                 all_findings.get(a.app_id, []), out_dir)
+            # 對外評審資料包一律用去識別化視圖，確保郵箱/電話/身份證等不退洩
+            view = self.redactor.safe_view(a) if self.redactor else a
+            safe_findings = ([replace(f, message=self.redactor.redact(f.message),
+                                      detail=self.redactor.redact(f.detail))
+                              for f in all_findings.get(a.app_id, [])]
+                             if self.redactor else all_findings.get(a.app_id, []))
+            safe_extract = ({k: (self.redactor.redact(v) if isinstance(v, str) else v)
+                             for k, v in extracts[a.app_id].items()}
+                            if self.redactor else extracts[a.app_id])
+            pack = reviewer_pack(view, self.prog, safe_extract,
+                                 safe_findings, out_dir, llm=self.llm)
             paths[a.app_id] = str(pack)
         self.audit.log("summarize", "packs", f"n={len(paths)}")
         return paths
 
-    # ---------- 阶段 4：评审汇总与通知 ----------
+    # ---------- 階段 4：評審彙總與通知 ----------
     def review(self, app: Application, scores: list[ReviewScore]) -> dict:
         agg = aggregate(scores, self.prog)
         agg["notice"] = result_notice(
@@ -74,7 +109,7 @@ class Pipeline:
                        f"{app.app_id} total={agg.get('weighted_total')}")
         return agg
 
-    # ---------- 阶段 5：项目追踪 ----------
+    # ---------- 階段 5：項目追蹤 ----------
     def track(self, app: Application, milestones: list[Milestone],
               periodic_reports: list[str] | None = None) -> str:
         report = management_report(app.app_id, app.title, milestones, periodic_reports)
@@ -86,7 +121,7 @@ class Pipeline:
 
 
 def load_applications(root: str | Path) -> list[Application]:
-    """从目录加载申请：每个子目录 = 一份申请，含 meta.json + 任意附件。"""
+    """從目錄加載申請：每個子目錄 = 一份申請，含meta.json + 任意附件。"""
     apps: list[Application] = []
     for sub in sorted(Path(root).iterdir()):
         if not sub.is_dir():

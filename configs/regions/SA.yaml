@@ -1,0 +1,15 @@
+code: SA
+name: 沙特阿拉伯
+languages: [ar, en]
+script: latin
+locale_terms: {}
+legal_keywords:
+  - PDPL
+  - SDAIA
+  - personal data
+date_formats: ["DD/MM/YYYY", "YYYY-MM-DD"]
+currency: SAR
+review_conventions:
+  - 英文為主要申請語言，阿拉伯文文件一併接受
+  - 須符合個人資料保護法(PDPL)，監管機構為SDAIA，2024年9月起全面執行
+  - 重視與2030願景的戰略對接及本地化成果

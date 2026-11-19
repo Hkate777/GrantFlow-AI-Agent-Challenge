@@ -7,6 +7,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - run: pip install pyyaml pytest
+      - run: pip install -r requirements.txt
+      # 語言檢查為提醒性質（OpenCC 可能誤判香港用字），不阻塞 CI
+      - run: python scripts/check_language.py
       - run: python -m pytest tests -q
       - run: python cli.py --out /tmp/kkg_out

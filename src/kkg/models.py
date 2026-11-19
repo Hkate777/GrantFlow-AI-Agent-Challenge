@@ -1,4 +1,4 @@
-"""统一数据模型：申请、文档、检查结果、评审、追踪记录。"""
+"""統一數據模型：申請、文檔、檢查結果、評審、追蹤記錄。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
@@ -34,13 +34,13 @@ class DocType(str, Enum):
 
 
 class FindingType(str, Enum):
-    MISSING = "missing"          # 缺失资料
-    DUPLICATE = "duplicate"      # 重复提交
-    FORMAT = "format"            # 格式问题
-    ELIGIBILITY = "eligibility"  # 资格不符
-    CONFLICT = "conflict"        # 潜在利益冲突
-    ANOMALY = "anomaly"          # 数值/内容异常
-    INCONSISTENT = "inconsistent"  # 跨源数据矛盾
+    MISSING = "missing"          # 缺失資料
+    DUPLICATE = "duplicate"      # 重複提交
+    FORMAT = "format"            # 格式問題
+    ELIGIBILITY = "eligibility"  # 資格不符
+    CONFLICT = "conflict"        # 潛在利益衝突
+    ANOMALY = "anomaly"          # 數值/內容異常
+    INCONSISTENT = "inconsistent"  # 跨源數據矛盾
 
 
 @dataclass
@@ -61,7 +61,7 @@ class Application:
     applicant: str
     email: str = ""
     team: list[str] = field(default_factory=list)
-    fields: dict[str, Any] = field(default_factory=dict)   # 结构化表单字段
+    fields: dict[str, Any] = field(default_factory=dict)   # 結構化表單字段
     docs: list[Document] = field(default_factory=list)
 
     @staticmethod
@@ -75,14 +75,14 @@ class Finding:
     severity: Severity
     message: str
     detail: str = ""
-    source: str = ""          # 触发来源（规则名/文档名）
-    needs_human: bool = False  # 是否需人工复核
+    source: str = ""          # 觸發來源（規則名/文檔名）
+    needs_human: bool = False  # 是否需人工複核
 
 
 @dataclass
 class ReviewScore:
     reviewer: str
-    criteria: dict[str, float]  # 维度 -> 分数
+    criteria: dict[str, float]  # 維度 -> 分數
     comment: str = ""
 
     @property

@@ -1,0 +1,15 @@
+code: EG
+name: 埃及
+languages: [ar, en]
+script: latin
+locale_terms: {}
+legal_keywords:
+  - Law 151/2020
+  - personal data
+  - Personal Data Protection Center
+date_formats: ["DD/MM/YYYY", "YYYY-MM-DD"]
+currency: EGP
+review_conventions:
+  - 英文為主要申請語言，阿拉伯文文件一併接受
+  - 須符合個人資料保護法(Law No.151/2020)，監管為Personal Data Protection Center
+  - 重視大規模教育覆蓋與基礎設施建設成果

@@ -1,0 +1,20 @@
+code: HK
+name: 香港
+languages: [zh-Hant, en]
+script: hant
+locale_terms:
+  软件: 軟件
+  网络: 網絡
+  信息: 資訊
+  视频: 視頻
+  质量: 質素
+  软件著作权: 軟件著作權
+legal_keywords:
+  - 個人資料
+  - 私隱
+date_formats: ["日/月/年", "YYYY-MM-DD"]
+currency: HK$
+review_conventions:
+  - 政府資助計劃重視成本控制及可持續性
+  - 申請人須說明資料私隱及個人資料保障措施
+  - 書面語以香港慣用繁體字為準，英文亦普遍接受

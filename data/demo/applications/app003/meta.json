@@ -1,13 +1,13 @@
 {
   "app_id": "APP-2027-003",
   "program": "HK-ACC-2027",
-  "title": "面向中小企的 AI 合规文书助手",
-  "applicant": "启明科技有限公司",
+  "title": "面向中小企的AI合規文書助手",
+  "applicant": "啓明科技有限公司",
   "email": "contact@qiming-tech.hk",
-  "team": ["陈晓峰", "李嘉颖", "王志豪", "赵一鸣", "陈思思", "刘子昂", "孙可欣", "周天成", "吴雨桐"],
+  "team": ["陳曉峯", "李嘉穎", "王志豪", "趙一鳴", "陳思思", "劉子昂", "孫可欣", "周天成", "吳雨桐"],
   "fields": {
     "org_type": "enterprise",
-    "contact": "陈晓峰",
+    "contact": "陳曉峯",
     "email": "contact@qiming-tech.hk",
     "budget": "2000000",
     "duration_m": "12"

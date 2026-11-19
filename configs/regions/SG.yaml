@@ -1,0 +1,14 @@
+code: SG
+name: 新加坡
+languages: [en, zh-Hans]
+script: latin
+locale_terms: {}
+legal_keywords:
+  - PDPA
+  - personal data
+date_formats: ["DD/MM/YYYY", "YYYY-MM-DD"]
+currency: S$
+review_conventions:
+  - 以英文為主要申請語言
+  - 須符合個人資料保護法(PDPA)
+  - 重視區域市場拓展與商業可行性

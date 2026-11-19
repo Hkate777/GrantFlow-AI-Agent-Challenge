@@ -1,0 +1,19 @@
+code: AU
+name: 澳洲
+languages: [en]
+script: latin
+locale_terms:
+  organization: organisation
+  analyze: analyse
+  color: colour
+  program: programme
+legal_keywords:
+  - Privacy Act
+  - APP
+  - OAIC
+date_formats: ["DD/MM/YYYY", "YYYY-MM-DD"]
+currency: AUD
+review_conventions:
+  - 以英文為申請語言，採英式英語拼寫
+  - 須符合 Privacy Act 1988 及 Australian Privacy Principles
+  - 重視與原住民社群的參與及區域共性效益

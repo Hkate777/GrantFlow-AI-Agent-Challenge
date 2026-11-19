@@ -1,0 +1,19 @@
+code: CN
+name: 中國內地
+languages: [zh-Hans]
+script: hans
+locale_terms:
+  軟件: 软件
+  網絡: 网络
+  資訊: 信息
+  視頻: 视频
+  質素: 质量
+legal_keywords:
+  - 个人信息保护法
+  - 数据安全法
+date_formats: ["年-月-日", "YYYY-MM-DD"]
+currency: ¥
+review_conventions:
+  - 資助計劃重視技術創新與產業化落地
+  - 須說明數據安全與個人信息保護措施
+  - 申請文件以簡體中文為主

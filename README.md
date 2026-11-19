@@ -1,105 +1,189 @@
-# GrantFlow · 申请评审与项目管理流程自动化 Agent
+![GrantFlow Banner](assets/banner.svg)
 
-> 「智赋香江」AI 智能体应用大赛 · 指定赛道 · **场景 16**（教育与文化创意赛道 · 校内行政工作流方向）
-> 参赛队伍：**KK_Garden**（2 人）
+# GrantFlow · 申請評審與項目管理流程自動化 Agent
 
-GrantFlow 面向大学、科技园、创投机构及创新创业支援单位，把「申请受理 → 资格审查 → 交叉验证 → 评审汇总 → 结果通知 → 项目追踪」的整条行政工作流交给智能体自动完成：
+> 「智賦香江」AI智能體應用大賽 · 指定賽道 · **場景16**（教育與文化創意賽道 · 校內行政工作流方向）
+> 參賽隊伍：**KK_Garden**（2人）
 
-- **多渠道受理**：各计划申请表、附件（PDF/DOCX/PPTX/XLSX/CSV/图片/视频）统一摄取解析
-- **声明式规则**：每个资助计划的要求、格式、资格、评审准则用 YAML 配置，无需改代码即可适配新计划
-- **完整性 & 合规审查**：必填资料、附件、格式、资格条件、潜在利益冲突逐项核查，缺失/错误/异常自动标记
-- **跨源交叉验证**：表单自报数据 vs 申请书内容自动比对，识别预算矛盾、信息不一致；批次级查重与预算离群检测
-- **评审资料包**：自动生成标准化申请摘要、一页式项目简介、评审核对清单（Reviewer Pack）
-- **评审汇总**：按维度权重计算加权总分，自动识别评分分歧并触发复议建议，生成结果通知与后续待办
-- **项目追踪**：里程碑、资助发放、定期报告跟踪，逾期/临期自动预警，输出管理报告
-- **全程可审计**：每个 Agent 动作写入审计日志，支持「人机协同」——关键节点显式标记需人工复核
+GrantFlow面向大學、科技園、創投機構及創新創業支援單位，把「申請受理：資格審查：交叉驗證：評審彙總：結果通知：項目追蹤」的整條行政工作流交給智能體自動完成。
+核心設計是**把每個資助計劃的差異做成配置、把敏感資訊擋在本機、把審查視角切換到當地**——一套引擎適配不同計劃、不同地區、不同模型，而無需改動程式：
 
-## 快速开始
+- **多渠道受理**：各計劃申請表、附件（PDF/DOCX/PPTX/XLSX/CSV/圖片/視頻）統一攝取解析
+- **聲明式規則**：每個資助計劃的要求、格式、資格、評審準則用YAML配置，無需改代碼即可適配新計劃
+- **完整性 & 合規審查**：必填資料、附件、格式、資格條件、潛在利益衝突逐項核查，缺失/錯誤/異常自動標記
+- **跨源交叉驗證**：表單自報數據vs申請書內容自動比對，識別預算矛盾、信息不一致；批次級查重與預算離羣檢測
+- **評審資料包**：自動生成標準化申請摘要、一頁式項目簡介、評審核對清單（Reviewer Pack）
+- **評審彙總**：按維度權重計算加權總分，自動識別評分分歧並觸發複議建議，生成結果通知與後續待辦
+- **項目追蹤**：里程碑、資助發放、定期報告跟蹤，逾期/臨期自動預警，輸出管理報告
+- **全程可審計**：每個Agent動作寫入審計日誌，關鍵節點標記為需人工複核
+- **多地區審查**：內置15個地區（中國香港、中國台灣、中國內地、新加坡、美國、英國、澳洲、加拿大、日本、韓國、阿聯酋、沙特、馬來西亞、泰國、埃及），Agent按地區載入語言字形、當地法規、貨幣格式及評審慣例；法規依據真實法律（UK GDPR、Privacy Act 1988、PIPEDA、PDPL、Law 151/2020 等）
+- **私隱與商業敏感防護**：送模型前先去識別化，電郵、電話、身份證、銀行卡、合約編號等以不可逆佔位符取代，原始值不離開本機；對外評審包、Excel總表與審計日誌均無明文敏感資訊
+- **多模型可插拔**：Mock離線可復現，亦支持 OpenAI 兼容端點、Anthropic Claude、Google Gemini；`--llm auto` 按已配置的API Key自動選擇，無密鑰時優雅降級
+
+## 語言規範
+
+項目展示以香港繁體及英文為主。README、docs、註解、提交訊息、示範數據及測試斷言一律使用繁體中文（香港慣用字）或英文，不出現簡體中文。`configs/regions/` 內的地區配置除外，那些是Agent用來處理多語言申請的資料：
+
+- 文件、註解、提交訊息、示範數據、測試斷言均須遵守；
+- **繁體必須符合香港慣用術語或香港書面語，不得使用台灣地區慣用語、內地書面語或直接以簡體逐字轉繁的產物**；有疑問時以香港政府、香港教育局及本地傳媒的用字習慣為準；
+- 香港標準詞彙對照（左側禁用，右側為推薦寫法）：
+
+  | 禁用（非香港標準） | 香港慣用寫法 |
+  |---|---|
+  | 軟體 | 軟件 |
+  | 網路 | 網絡 |
+  | 視訊 | 視頻 |
+  | 行動電話 | 手提電話 |
+  | 智慧財產 | 知識產權 |
+  | 人工智慧 | 人工智能 |
+  | 質量（指素質時） | 質素 |
+
+  常見香港書面用字：人工智能、網絡、數據、軟件、視頻、資訊、項目、質素、註冊等；「信息」與「資訊」均可，但同一文件內須保持一致；
+- 提交前可執行 `python scripts/check_language.py`（CI亦會自動執行）：腳本以OpenCC `s2hk` 檢查全部受版本控制的文字檔。**CI採用警告模式**，只提示、不阻塞流程（OpenCC偶爾會把香港標準「說明」誤判為「説明」）；如需嚴格把關，可自行執行 `python scripts/check_language.py --strict`。
+
+## 快速開始
 
 ```bash
-pip install -r requirements.txt   # 最小依赖仅 pyyaml（其余为可选解析库）
+pip install -r requirements.txt   # 最小依賴僅 pyyaml（其餘為可選解析庫）
 
-# 跑通 demo 全流程（离线、无需任何 API Key）
+# 跑通 demo 全流程（離線、無需任何 API Key）
 python cli.py
 
-# 启动 Web 面板（http://127.0.0.1:8000）
+# 啓動 Web 面板（http://127.0.0.1:8000）
 python app.py
 
-# 运行测试
+# 運行測試
 python -m pytest tests -q
 ```
 
-接入真实大模型（可选，显著提升抽取与摘要质量）：
+接入真實大模型（可選，可改善抽取與摘要品質；不配置則用離線Mock）：
 
 ```bash
-export OPENAI_API_KEY=sk-...        # 支持任意 OpenAI 兼容端点
-export OPENAI_BASE_URL=https://...  # 可选
-export OPENAI_MODEL=gpt-4o-mini     # 可选
+# OpenAI兼容端點（含DeepSeek、通義、Moonshot等）
+export OPENAI_API_KEY=sk-...
+export OPENAI_BASE_URL=https://...  # 可選
+export OPENAI_MODEL=gpt-4o-mini     # 可選
 python cli.py --llm openai
+
+# Anthropic Claude
+export ANTHROPIC_API_KEY=sk-ant-...
+python cli.py --llm anthropic
+
+# Google Gemini
+export GEMINI_API_KEY=...
+python cli.py --llm gemini
+
+# 自動：按已配置的API Key依次選擇，全部沒有則降級Mock
+python cli.py --llm auto
 ```
 
-## 架构
+私隱防護默認開啟。如需在本機受信任環境關閉（不建議用於真實申請）：
+
+```bash
+# 在程式中 Pipeline(prog, privacy=False)；CLI/Web 默認開啟
+```
+
+按地區審查（Agent會載入當地語言字形、法規、格式及評審慣例）：
+
+```bash
+python cli.py --region HK    # 中國香港（繁體／英文，個人資料私隱條例）
+python cli.py --region JP    # 日本（APPI／個人情報保護法）
+python cli.py --region KR    # 韓國（PIPA／個人情報保護法）
+python cli.py --region GB    # 英國（英文，UK GDPR／Data Protection Act）
+python cli.py --region AU    # 澳洲（英文，Privacy Act 1988／APP）
+python cli.py --region AE    # 阿聯酋（PDPL 2021年第45號聯邦法令）
+python cli.py --region SA    # 沙特（PDPL／SDAIA）
+python cli.py --region EG    # 埃及（Law No.151/2020）
+python cli.py --region CN    # 中國內地（簡體，個人信息保護法／數據安全法）
+```
+
+共15個地區，完整清單見 `configs/regions/`。Web面板亦有地區下拉選單；新增地區只需加入一份yaml。選地依據及法規對照見 `docs/architecture.md`。
+
+## 架構
 
 ```mermaid
 flowchart LR
-    A[多渠道提交资料] --> B[Ingest Agent<br/>多格式解析]
-    B --> C[Extract Agent<br/>LLM 结构化抽取]
-    C --> D[Check Agent<br/>完整性/格式/资格/利益冲突]
-    D --> E[Verify Agent<br/>跨源交叉验证/查重/异常检测]
-    E --> F[Summarize Agent<br/>摘要/一页简介/评审资料包]
-    F --> G[Review Agent<br/>加权汇总/分歧识别/结果通知]
-    G --> H[Track Agent<br/>里程碑/资助/预警/管理报告]
-    I[(计划规则 YAML<br/>声明式配置)] --> D
+    A[多渠道提交資料] --> B[Ingest Agent<br/>多格式解析]
+    B --> C[Extract Agent<br/>LLM 結構化抽取]
+    C --> D[Check Agent<br/>完整性/格式/資格/利益衝突]
+    D --> E[Verify Agent<br/>跨源交叉驗證/查重/異常檢測]
+    E --> F[Summarize Agent<br/>摘要/一頁簡介/評審資料包]
+    F --> G[Review Agent<br/>加權彙總/分歧識別/結果通知]
+    G --> H[Track Agent<br/>里程碑/資助/預警/管理報告]
+    I[(計劃規則 YAML<br/>聲明式配置)] --> D
     I --> G
-    J[人工复核点] -.介入.-> D
+    J[人工複核點] -.介入.-> D
     J -.介入.-> G
-    K[Audit Trail<br/>全程审计日志] --- B & C & D & E & F & G & H
+    K[Audit Trail<br/>全程審計日誌] --- B & C & D & E & F & G & H
 ```
 
-## 目录结构
+## 目錄結構
 
 ```
-├── configs/program_demo.yaml   # 示范计划规则（声明式配置）
-├── data/demo/                  # 3 份示范申请（含异常用例）+ 评审评分
+├── assets/
+│   └── banner.svg              # 倉庫封面橫幅
+├── configs/
+│   ├── program_demo.yaml       # 示範計劃規則（聲明式配置）
+│   └── regions/                # 15個地區資料（HK/TW/CN/SG/US/GB/AU/JP/KR/CA/AE/SA/MY/TH/EG）
+├── data/demo/                  # 3 份示範申請（含異常用例）+ 評審評分
 ├── src/kkg/                    # 核心包
-│   ├── ingest.py               # 多格式文档摄取（可选依赖、优雅降级）
-│   ├── extract.py              # LLM 抽取 + 交叉验证 + 异常检测
-│   ├── check.py                # 完整性/格式/资格/利益冲突/查重
-│   ├── summarize.py            # 摘要 / 一页简介 / 评审资料包
-│   ├── review.py               # 加权汇总 / 分歧识别 / 通知 / 待办
-│   ├── track.py                # 里程碑 / 资助 / 预警 / 管理报告
-│   ├── pipeline.py             # Agentic Workflow 编排 + 审计
-│   ├── llm.py                  # 可插拔 LLM（Mock 离线可复现）
-│   ├── program.py              # 计划规则模型
-│   └── models.py               # 数据模型 + 审计日志
-├── cli.py                      # 一键跑通全流程
+│   ├── ingest.py               # 多格式文檔攝取（可選依賴、優雅降級）
+│   ├── extract.py              # LLM 抽取 + 交叉驗證 + 異常檢測
+│   ├── check.py                # 完整性/格式/資格/利益衝突/查重
+│   ├── summarize.py            # 摘要 / 一頁簡介 / 評審資料包
+│   ├── review.py               # 加權彙總 / 分歧識別 / 通知 / 待辦
+│   ├── track.py                # 里程碑 / 資助 / 預警 / 管理報告
+│   ├── pipeline.py             # Agentic Workflow 編排 + 審計
+│   ├── llm.py                  # 可插拔模型（Mock/OpenAI/Claude/Gemini，優雅降級）
+│   ├── privacy.py              # 私隱與商業敏感資訊去識別化 + 審計
+│   ├── program.py              # 計劃規則模型
+│   ├── models.py               # 數據模型 + 審計日誌
+│   ├── region.py               # 地區模型 + 字形檢測
+│   └── export.py               # 評審彙總 Excel 匯出（三個工作表，敏感欄位脫敏）
+├── cli.py                      # 一鍵跑通全流程
 ├── app.py                      # FastAPI Web 面板
-├── tests/                      # 端到端测试
-└── docs/                       # 架构说明 / 计划书大纲 / 评审映射
+├── scripts/
+│   ├── check_language.py       # 語言規範檢查（預設警告，--strict 嚴格）
+│   ├── benchmark.py            # 量化基準測試：計劃書「可量化成效」
+│   └── pitch_demo.py           # 一鍵生成決賽演示全套物料：output/pitch/
+├── tests/                      # 端到端測試
+└── docs/                       # 架構説明 / 計劃書大綱 / 評審映射
 ```
 
-## Demo 数据说明（故意内置异常，验证 Agent 检出能力）
+## 演示與量化數據
 
-| 申请 | 预期检出 |
+```bash
+python scripts/benchmark.py     # 輸出 output/benchmark_report.md（效率與檢出率）
+python -m kkg.export            # 輸出 output/review_summary.xlsx（申請總覽/發現明細/評分明細）
+python scripts/pitch_demo.py    # 一鍵生成全套決賽物料（含 8 分鐘演示腳本）
+```
+
+`pitch_demo.py` 會把評審資料包、結果通知、待辦、管理報告、彙總Excel、基準報告及審計日誌集中輸出到 `output/pitch/`，適合決賽現場直接展示。
+
+## Demo數據説明（故意內置異常，驗證Agent檢出能力）
+
+| 申請 | 預期檢出 |
 |---|---|
-| APP-2027-001 | ✅ 基本合规（仅建议项缺失提示） |
-| APP-2027-002 | ⚠️ 表单预算 15 万 vs 申请书 9.5 万（跨源矛盾） |
-| APP-2027-003 | ❌ 团队 9 人超上限、预算 200 万超计划上限 50 万、触发评审人利益冲突（CUHK）、与 APP-2027-001 疑似重复、预算批次离群 |
+| APP-2027-001 | [通過] 基本合規（僅建議項缺失提示） |
+| APP-2027-002 | [注意] 表單預算 15 萬 vs 申請書 9.5 萬（跨源矛盾） |
+| APP-2027-003 | [未通過] 團隊 9 人超上限、預算 200 萬超計劃上限 50 萬、觸發評審人利益衝突（CUHK）、與 APP-2027-001 疑似重複、預算批次離羣 |
 
-## 负责任 AI
+## 負責任AI
 
-- 所有自动化结论附 **severity + needs_human** 标记，关键决策（资格淘汰、利益冲突、复议）默认人工复核
-- 审计日志记录每次 Agent 动作与依据，可追溯、可复现
-- MockLLM 保证无外部调用时结果确定一致；真实 LLM 温度固定 0.2
-- 数据仅在本机处理，不上传第三方
+- 所有自動化結論附 **severity + needs_human** 標記，關鍵決策（資格淘汰、利益衝突、複議）默認人工複核
+- 審計日誌記錄每次Agent動作與依據，可追溯、可復現
+- **私隱優先**：送模型前先去識別化，原始敏感值不離開本機；映射只在記憶體，不落盤；對外評審包、Excel與審計日誌均無明文敏感資訊
+- 地區合規檢查為建議性提示，不自動判定資格，最終由人工確認適用性
+- MockLLM保證無外部調用時結果確定一致；真實模型 temperature 固定0.2
+- 接入真實模型時數據已先脫敏，降低敏感資訊外洩至第三方的風險
 
-## 路线图
+## 路線圖
 
-- [ ] 邮件/IMAP 渠道自动收件与附件归档
-- [ ] 图片 OCR 与视频转写（接入多模态模型）
-- [ ] 评审意见情感分析与评分校准建议
-- [ ] 多计划并行受理看板（Supabase 持久化）
-- [ ] MCP 工具封装，供其他 Agent 调用复用
+- [ ] 郵件/IMAP渠道自動收件與附件歸檔
+- [ ] 圖片OCR與視頻轉寫（接入多模態模型）
+- [ ] 評審意見情感分析與評分校準建議
+- [ ] 多計劃並行受理看板（Supabase持久化）
+- [ ] MCP工具封裝，供其他Agent調用複用
 
 ---
 

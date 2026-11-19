@@ -1,0 +1,14 @@
+code: TH
+name: 泰國
+languages: [th, en]
+script: latin
+locale_terms: {}
+legal_keywords:
+  - PDPA
+  - personal data
+date_formats: ["DD/MM/YYYY", "YYYY-MM-DD"]
+currency: THB
+review_conventions:
+  - 英文為主要申請語言，泰文文件一併接受
+  - 須符合個人資料保護法(PDPA)
+  - 重視職業教育與產業人才培育成效

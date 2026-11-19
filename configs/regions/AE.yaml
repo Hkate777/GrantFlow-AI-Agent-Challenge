@@ -1,0 +1,15 @@
+code: AE
+name: 阿拉伯聯合酋長國
+languages: [ar, en]
+script: latin
+locale_terms: {}
+legal_keywords:
+  - PDPL
+  - personal data
+  - data protection
+date_formats: ["DD/MM/YYYY", "YYYY-MM-DD"]
+currency: AED
+review_conventions:
+  - 英文為主要申請語言，阿拉伯文文件一併接受
+  - 須符合PDPL(2021年第45號聯邦法令)，DIFC及ADGM自由區另有獨立法規
+  - 重視與國家願景及Dubai戰略的對接

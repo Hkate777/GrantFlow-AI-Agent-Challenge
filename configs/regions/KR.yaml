@@ -1,0 +1,15 @@
+code: KR
+name: 韓國
+languages: [ko, en]
+script: latin
+locale_terms: {}
+legal_keywords:
+  - PIPA
+  - 個人情報保護法
+  - personal data
+date_formats: ["YYYY.MM.DD", "YYYY-MM-DD"]
+currency: KRW
+review_conventions:
+  - 申請可以英文為主，韓文文件一併接受
+  - 須說明個人資料處理符合個人情報保護法(PIPA)及個人情報保護委員會(PIPC)要求
+  - 重視技術原創性與產業化落地

@@ -1,0 +1,18 @@
+code: CA
+name: 加拿大
+languages: [en, fr]
+script: latin
+locale_terms:
+  organization: organisation
+  analyze: analyse
+  color: colour
+legal_keywords:
+  - PIPEDA
+  - privacy
+  - personal information
+date_formats: ["DD/MM/YYYY", "YYYY-MM-DD"]
+currency: CAD
+review_conventions:
+  - 英文或法文均可作申請語言
+  - 須符合 PIPEDA 及省級私隱法規
+  - 重視多元包容與公共服務覆蓋
