@@ -1,4 +1,4 @@
-"""Local case storage with serialized writes and revision checks."""
+"""個案儲存層：串行化寫入、版本衝突檢查與分頁查詢。"""
 from __future__ import annotations
 
 import json
