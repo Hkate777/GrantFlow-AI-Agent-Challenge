@@ -6,6 +6,7 @@ import io
 import ipaddress
 import json
 import os
+import sqlite3
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -24,6 +25,7 @@ from starlette.staticfiles import StaticFiles
 BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE / "src"))
 
+from kkg import __version__
 from kkg.auth import AccountDisabled, AuthError, AuthStore, Forbidden, Identity
 from kkg.guard import review_output, scan_prompt_injection
 from kkg.llm import MockLLM, get_llm
@@ -33,6 +35,8 @@ from kkg.privacy import scan_sensitive
 from kkg.program import Program
 from kkg.region import Region
 from kkg import script as script_std
+from kkg.serve import (IPReputation, RateLimiter, RuntimeConfig,
+                       apply_security_headers, client_ip, security_event)
 from kkg.storage import CaseStore, MissingCase, WorkspaceConflict
 from kkg.submission import MAX_FILES, MAX_FILE_BYTES, MAX_METADATA_BYTES, MAX_UPLOAD_BYTES, read_message, read_metadata
 from kkg.summarize import reviewer_pack
@@ -169,7 +173,7 @@ def _demo_scores() -> dict[str, list[ReviewScore]]:
 
 def _auth_guard(request: Request) -> Identity:
     """全局認證閘：放行首頁/靜態/登入端點，其餘要求已認證身份（P0-06）。"""
-    if request.url.path in {"/", "/api/auth/login"} or request.url.path.startswith("/static"):
+    if request.url.path in {"/", "/healthz", "/readyz", "/api/auth/login"} or request.url.path.startswith("/static"):
         return Identity("anonymous", "匿名", "anonymous")
     auth_store: AuthStore = request.app.state.auth
     try:
@@ -211,34 +215,76 @@ ROLE_SIGN = ("approver",)
 ROLE_PROJECT = ("finance",)
 
 
-def create_app(database: str | Path | None = None, configs: Path | None = None) -> FastAPI:
+def create_app(database: str | Path | None = None, configs: Path | None = None,
+               runtime: RuntimeConfig | None = None) -> FastAPI:
     database = database or os.environ.get("GRANTFLOW_DB") or BASE / "output/grantflow.sqlite3"
+    runtime = runtime or RuntimeConfig.from_env()
     auth_store = AuthStore(Path(database).parent / "auth.sqlite3")
     created = auth_store.ensure_defaults(os.environ.get("GRANTFLOW_BOOTSTRAP_PASSWORD"))
     if "admin" in created:
         print(f"[auth] 初始管理員：admin / {created['admin']}（請立即記錄並更換口令）")
         print(f"[auth] 演示賬號：demo / {created['demo']}（正式環境請停用）")
     workspace = Workspace(CaseStore(database), _programs(configs or BASE / "configs"))
-    api = FastAPI(title="GrantFlow", version="0.2.0", docs_url=None, redoc_url=None,
+    api = FastAPI(title="GrantFlow", version=__version__, docs_url=None, redoc_url=None,
                   dependencies=[Depends(_auth_guard)])
-    api.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
+    api.add_middleware(TrustedHostMiddleware, allowed_hosts=list(runtime.allowed_hosts))
     api.state.auth = auth_store  # P0-06：guard 與 auth 端點共用身份存儲
+    api.state.runtime = runtime
+    limiter = RateLimiter(runtime.rate_per_minute)
+    reputation = IPReputation(runtime.auth_fail_limit, runtime.ban_minutes)
+    log_directory = Path(database).parent
+
+    def _guard_response(message: str, status: int, retry: int = 0) -> JSONResponse:
+        reply = JSONResponse({"detail": message}, status_code=status)
+        if retry:
+            reply.headers["Retry-After"] = str(retry)
+        apply_security_headers(reply, runtime)
+        return reply
 
     @api.middleware("http")
-    async def local_requests(request: Request, call_next):
-        if not _loopback(request):
-            return JSONResponse({"detail": "工作台只接受本機連線。"}, status_code=403)
+    async def network_guard(request: Request, call_next):
+        path = request.url.path
+        address = client_ip(request, trust_proxy=runtime.trust_proxy)
+        # 健康檢查供負載均衡器使用：不帶業務資料、不做認證，也不受失敗封鎖影響。
+        if path in {"/healthz", "/readyz"}:
+            response = await call_next(request)
+            apply_security_headers(response, runtime)
+            return response
+        if not runtime.network_allowed(address) or (not runtime.remote_access and not _loopback(request)):
+            security_event(log_directory, "denied-network", address, path)
+            return _guard_response("工作台不接受此來源的連線。", 403)
+        banned, retry = reputation.banned(address)
+        if banned:
+            security_event(log_directory, "address-banned", address, path)
+            return _guard_response("連線已被暫時封鎖，請稍後重試。", 429, retry)
+        allowed, retry = limiter.allow(address)
+        if not allowed:
+            security_event(log_directory, "rate-limited", address, path)
+            return _guard_response("請求過於頻繁，請稍後重試。", 429, retry)
         origin = request.headers.get("origin")
-        local_origin = f"{request.url.scheme}://{request.url.netloc}"
-        if request.method not in {"GET", "HEAD", "OPTIONS"} and origin is not None and origin != local_origin:
-            return JSONResponse({"detail": "請在工作台內操作。"}, status_code=403)
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and origin is not None:
+            scheme = (request.headers.get("x-forwarded-proto", request.url.scheme)
+                      if runtime.trust_proxy else request.url.scheme)
+            host = (request.headers.get("x-forwarded-host") if runtime.trust_proxy else None) \
+                or request.headers.get("host", request.url.netloc)
+            local_origin = f"{scheme}://{host}"
+            if origin != local_origin and origin not in runtime.public_origins:
+                security_event(log_directory, "origin-rejected", address, path, origin[:200])
+                return _guard_response("請在工作台內操作。", 403)
         length = request.headers.get("content-length")
         if length and (not length.isdecimal() or len(length) > 10 or int(length) > MAX_UPLOAD_BYTES + 256 * 1024):
-            return JSONResponse({"detail": "請求大小超出上限。"}, status_code=413)
+            security_event(log_directory, "oversized-request", address, path)
+            return _guard_response("請求大小超出上限。", 413)
         response = await call_next(request)
-        response.headers["Content-Security-Policy"] = "default-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        if request.url.path.startswith("/api/"):
+        if response.status_code in {401, 403}:
+            reputation.record_failure(address)
+            security_event(log_directory, "auth-failure", address, path, f"status={response.status_code}")
+        elif response.status_code < 400:
+            reputation.record_success(address)
+        elif response.status_code in {413, 429}:
+            security_event(log_directory, "throttled", address, path, f"status={response.status_code}")
+        apply_security_headers(response, runtime)
+        if path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -257,6 +303,21 @@ def create_app(database: str | Path | None = None, configs: Path | None = None) 
     @api.exception_handler(Forbidden)
     async def role_denied(_request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=403)
+
+    @api.get("/healthz")
+    def healthz():
+        """存活探測：證明進程在線，供容器協調器與反向代理使用。"""
+        return {"status": "ok", "version": __version__}
+
+    @api.get("/readyz")
+    def readyz():
+        """就緒探測：確認個案資料庫可讀寫，否則回 503 讓流量暫停進入。"""
+        try:
+            with workspace.store.transaction() as connection:
+                connection.execute("SELECT 1").fetchone()
+        except sqlite3.Error as exc:
+            return JSONResponse({"status": "unavailable", "detail": str(exc)}, status_code=503)
+        return {"status": "ready"}
 
     @api.get("/", response_class=FileResponse)
     def index():
@@ -485,7 +546,10 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    parser = argparse.ArgumentParser(description="啓動 GrantFlow 本機工作台")
-    parser.add_argument("--port", type=int, default=8000)
+    runtime: RuntimeConfig = app.state.runtime
+    parser = argparse.ArgumentParser(description="啓動 GrantFlow 工作台")
+    parser.add_argument("--host", default=runtime.host, help="監聽地址；容器部署用 0.0.0.0")
+    parser.add_argument("--port", type=int, default=runtime.port)
     args = parser.parse_args()
-    uvicorn.run(app, host="127.0.0.1", port=args.port, proxy_headers=False)
+    uvicorn.run(app, host=args.host, port=args.port,
+                proxy_headers=runtime.trust_proxy, timeout_keep_alive=5)

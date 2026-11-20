@@ -1,0 +1,30 @@
+services:
+  grantflow:
+    build: .
+    image: grantflow:local
+    container_name: grantflow
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      GRANTFLOW_HOST: 0.0.0.0
+      GRANTFLOW_PORT: 8000
+      GRANTFLOW_DB: /data/grantflow.sqlite3
+      # 正式部署改為實際域名，例如 grantflow.example.edu.hk,localhost,127.0.0.1
+      GRANTFLOW_ALLOWED_HOSTS: ${GRANTFLOW_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      GRANTFLOW_BOOTSTRAP_PASSWORD: ${GRANTFLOW_BOOTSTRAP_PASSWORD:-}
+      GRANTFLOW_VAULT_PASS: ${GRANTFLOW_VAULT_PASS:-}
+      GRANTFLOW_RATE_LIMIT_PER_MIN: ${GRANTFLOW_RATE_LIMIT_PER_MIN:-120}
+      GRANTFLOW_AUTH_FAIL_LIMIT: ${GRANTFLOW_AUTH_FAIL_LIMIT:-10}
+      GRANTFLOW_BAN_MINUTES: ${GRANTFLOW_BAN_MINUTES:-15}
+    volumes:
+      - grantflow-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; raise SystemExit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  grantflow-data:

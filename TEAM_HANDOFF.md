@@ -151,6 +151,12 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 
 ---
 
+## 7a. 部署與網絡防護（最新疊代）
+
+`src/kkg/serve.py` 集中管理部署配置：本機預設只聽 loopback；設 `GRANTFLOW_HOST=0.0.0.0` 才接受遠端。`app.py` 的中間件加入每地址滑動窗口限流、連續認證失敗臨時封鎖、Host/Origin/CIDR 約束、請求大小上限與安全響應頭；`output/security.log` 只記事件、地址、路徑與狀態碼，不含憑據。健康端點 `/healthz`、`/readyz` 供容器與負載均衡器使用。`scripts/start.sh` 提供 local/remote/docker/test 四種模式；Fly.io 與 Render 範例在 `deploy/`。反向代理必須設 `GRANTFLOW_TRUST_PROXY=true`，並把 Host、X-Forwarded-* 正確轉發；直接對外則保持 `false`。詳情見 `docs/deployment.md`。
+
+---
+
 ## 8. 待辦（引用審評清單）
 
 - [x] ~~PR 合併 `codex/web-workbench-merge` → `main`~~（已完成，現 main @ `280a60f`）
@@ -191,15 +197,17 @@ configs/campus_pilot.yaml     校園試點計劃（第二套規則）
 configs/regions/*.yaml        15 地區配置
 web/                  前端（app.js/index.html/styles.css）
 scripts/              check_language.py / benchmark.py / pitch_demo.py / vault_cli.py
-tests/                141 項測試（含 test_roles/test_security/test_script/test_tracking…）
-docs/                 architecture.md / proposal-outline.md / RELEASE_NOTES_v1.0~v1.1
+tests/                159 項測試（含 test_roles/test_security/test_script/test_tracking/test_serve…）
+docs/                 architecture.md / deployment.md / proposal-outline.md / RELEASE_NOTES_v1.0~v1.1
+Dockerfile / docker-compose.yml  非 root 容器、/data 持久卷、健康檢查
+deploy/               fly.toml / render.yaml 雲端部署範例
 ```
 
 ---
 
 ## 10. 接手第一天建議
 
-1. `git switch main && git pull` → `python -m pytest tests -q`（應 141/141）。
+1. `git switch main && git pull` → `python -m pytest tests -q`（應 159/159）；異地啟動見 `docs/deployment.md`。
 2. 起 Web 工作台（臨時 DB），用不同角色賬號登入，驗證角色矩陣：operator 可收件但不可簽發、approver 才可簽發、finance 才可動台帳。
 3. 載入示範申請，檢查 002 的「待複議」狀態、評審包導出、字形審計端點 `/api/script/audit` 與安全掃描 `/api/security/scan`。
 4. 讀 [全面審評與改進清單](<C:/Users/25345/Documents/New project/GrantFlow_全面审评与改进清单.md>) 的 P0 表，認領剩餘的人工項（OIDC/SSO、環境分離、備份演練）或 P0-08 遷移腳本。

@@ -1,0 +1,35 @@
+# Fly.io 部署範例：先把 app 名稱改為你自己的項目，再執行 fly deploy。
+# 資料卷掛載於 /data，重建機器後個案與帳號不會丟失。
+app = "grantflow-kkgarden"
+primary_region = "hkg"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  GRANTFLOW_HOST = "0.0.0.0"
+  GRANTFLOW_PORT = "8000"
+  GRANTFLOW_DB = "/data/grantflow.sqlite3"
+  GRANTFLOW_ALLOWED_HOSTS = "grantflow-kkgarden.fly.dev,localhost,127.0.0.1"
+  GRANTFLOW_TRUST_PROXY = "true"
+  GRANTFLOW_HTTPS_ONLY = "true"
+  GRANTFLOW_RATE_LIMIT_PER_MIN = "120"
+  GRANTFLOW_AUTH_FAIL_LIMIT = "10"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/healthz"
+
+[mounts]
+  source = "grantflow_data"
+  destination = "/data"

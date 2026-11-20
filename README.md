@@ -29,7 +29,7 @@ GrantFlow面向大學、科技園、創投機構及創新創業支援單位，�
 
 - 技術術語、API 名稱、程式識別碼、法規簡稱（如 GDPR、PIPEDA、APPI）保留英文原文，往往更精確；
 - 說明性文字可用香港繁體或英文，同一文件內保持一致即可；
-- 遇到 OpenCC 對香港標準字的常見誤判（說明、用戶、脫敏、離群值等），以香港慣用寫法為準。
+- 遇到 OpenCC 對香港標準字的常見誤判（說明、用戶、客戶端、脫敏、離群值等），以香港慣用寫法為準。
 
 `scripts/check_language.py` 是**可選的一致性輔助工具**（以 OpenCC `s2hk` 提示可能的簡體字或非香港用字），預設只警告、不阻塞；OpenCC 偶有誤判，提示僅供人工參考。它約束的是本項目自身的展示一致性，而非 Agent 的處理能力——後者由下面的字形標準化引擎負責，要求做到「絕對正確」。
 
@@ -162,6 +162,45 @@ python cli.py --region CN    # 中國內地（簡體，個人信息保護法／�
 
 共15個地區，完整清單見 `configs/regions/`。Web面板亦有地區下拉選單；新增地區只需加入一份yaml。選地依據及法規對照見 `docs/architecture.md`。
 
+## 異地部署與網絡防護
+
+工作台既可本機演示，也可容器或雲端部署。預設只監聽 `127.0.0.1`；要讓其他機器連入，必須明確設定監聽地址與允許的 Host，避免誤把示範服務暴露到公網。
+
+```bash
+./scripts/start.sh local       # 本機：127.0.0.1:8000
+./scripts/start.sh remote      # 遠端：0.0.0.0，需先設 GRANTFLOW_ALLOWED_HOSTS
+./scripts/start.sh docker      # 容器：docker compose up --build -d
+./scripts/start.sh test        # 一鍵執行全部測試
+```
+
+容器以非 root 用戶執行，資料寫入具名卷 `grantflow-data`（掛載於 `/data`），重建容器不會遺失個案與帳號。兩個健康端點供負載均衡器與容器協調器使用：`GET /healthz`（存活）與 `GET /readyz`（就緒，會檢查資料庫可讀寫，異常回 503）；兩者不含業務資料，亦不需登入。
+
+雲端範例設定置於 `deploy/`：`fly.toml`（Fly.io 香港區域 + 持久卷）與 `render.yaml`（Render Blueprint）。上線前把 app 名稱與域名換成自己的項目，並在平台後台設定 `GRANTFLOW_BOOTSTRAP_PASSWORD` 與 `GRANTFLOW_VAULT_PASS`。
+
+| 環境變數 | 用途 | 預設 |
+|---|---|---|
+| `GRANTFLOW_HOST` | 監聽地址；遠端或容器用 `0.0.0.0` | `127.0.0.1` |
+| `GRANTFLOW_PORT` | 監聽埠 | `8000` |
+| `GRANTFLOW_DB` | 個案資料庫路徑 | `output/grantflow.sqlite3` |
+| `GRANTFLOW_ALLOWED_HOSTS` | Host 白名單，以逗號分隔 | `127.0.0.1,localhost,testserver` |
+| `GRANTFLOW_ALLOWED_CIDRS` | IP 網段白名單，留空不限制 | 空 |
+| `GRANTFLOW_TRUST_PROXY` | 只在可信反向代理後啟用，以便解析轉發地址 | `false` |
+| `GRANTFLOW_HTTPS_ONLY` | 啟用 HSTS 響應頭（需前端已啟用 HTTPS） | `false` |
+| `GRANTFLOW_RATE_LIMIT_PER_MIN` | 每地址每分鐘請求上限 | `120` |
+| `GRANTFLOW_AUTH_FAIL_LIMIT` | 連續認證失敗封鎖閾值 | `10` |
+| `GRANTFLOW_BAN_MINUTES` | 臨時封鎖分鐘數 | `15` |
+| `GRANTFLOW_PUBLIC_ORIGINS` | 額外允許的寫入 Origin，留空即只容許同源 | 空 |
+
+防護要點：
+
+- **速率限制**：每地址滑動窗口限流，超限回 429 並附 `Retry-After`；健康端點不計入限流。
+- **失敗封鎖**：連續 401/403 達閾值即臨時封鎖該地址，事件寫入 `output/security.log`（只記時間、事件、地址、路徑與狀態碼；口令、憑據與請求內容一律不記，且對 `password=`/`token=` 等形式再作遮蔽）。
+- **來源約束**：Host 白名單、寫入的 Origin 同源檢查、可選 CIDR 白名單、請求大小上限，配合 CSP、X-Frame-Options、Referrer-Policy、HSTS 等安全響應頭。
+- **代理感知**：只有在 `GRANTFLOW_TRUST_PROXY=true` 時才讀取 `X-Forwarded-For` 的最右值；直接對外服務時一律以 TCP 對端為準，防止偽造標頭繞過封鎖。
+- **持久化與重啟**： SQLite 資料庫與驗證資料庫同置於掛載目錄，容器或機器重啟後個案、帳號與工作階段設定保持一致。
+
+> 正式對外必須啟用 HTTPS（平台強制或反向代理），停用演示帳號，並把 `GRANTFLOW_ALLOWED_HOSTS` 設為實際域名；若服務對象固定，建議同時設定 `GRANTFLOW_ALLOWED_CIDRS`。詳細選項與事故處理見 `docs/deployment.md`。
+
 ## 架構
 
 ```mermaid
@@ -215,19 +254,24 @@ flowchart LR
 │   ├── models.py               # 數據模型 + 審計日誌
 │   ├── region.py               # 地區模型 + 字形檢測 + 當地日期
 │   ├── timezone.py             # 15 地區 IANA 時區映射 + 當地今天判定（降級容錯）
+│   ├── serve.py                # 部署配置、限流、失敗封鎖與安全響應頭
 │   └── export.py               # 評審彙總 Excel 匯出（三個工作表，敏感欄位脫敏）
 ├── cli.py                      # 命令行一鍵跑通全流程
-├── app.py                      # FastAPI Web 工作台（create_app 工廠 + 24 個 API）
+├── app.py                      # FastAPI Web 工作台（create_app 工廠 + 26 個 API）
 ├── web/                        # 工作台前端（index.html/app.js/styles.css）
+├── Dockerfile                  # 非 root 容器映像 + /data 持久卷 + 健康檢查
+├── docker-compose.yml          # 一鍵容器啟動與資料卷
+├── deploy/                     # Fly.io / Render 部署範例
 ├── scripts/
+│   ├── start.sh                # 一鍵啟動器（local/remote/docker/test）
 │   ├── check_language.py       # 語言規範檢查（預設警告，--strict 嚴格）
 │   ├── benchmark.py            # 量化基準測試：計劃書「可量化成效」
 │   ├── export_summary.py       # 匯出評審總覽 Excel
 │   ├── vault_cli.py            # 加密密鑰環管理（set/get/list/delete/verify）
 │   └── pitch_demo.py           # 一鍵生成決賽演示全套物料：output/pitch/
-├── tests/                      # 148 項端到端測試（含 19 項安全、7 項時區測試）
+├── tests/                      # 159 項端到端測試（含 19 項安全、7 項時區、11 項部署防護）
 ├── TEAM_HANDOFF.md             # 團隊交接説明（現況/歷史線/設計決策/分工）
-└── docs/                       # 架構説明 / 計劃書大綱 / 版本説明 / 評審映射
+└── docs/                       # 架構説明 / 部署指南 / 版本説明 / 評審映射
 ```
 
 ## 演示與量化數據
@@ -258,6 +302,7 @@ python scripts/pitch_demo.py    # 一鍵生成全套決賽物料（含 8 分鐘�
 - 接入真實模型時數據已先脫敏，降低敏感資訊外洩至第三方的風險
 - **不被惡意引導**：申請內容視為不可信輸入，提示注入只標記不執行；模型輸出經安全審查才採用，可疑即轉人工覆核
 - **憑據不落盤**：模型 API Key 存放於加密密鑰環（scrypt + HMAC 認證），明文不進檔案、日誌或清單
+- **網絡縱深防禦**：按地址限流、連續認證失敗自動封鎖、Host/Origin/CIDR 約束、安全響應頭與無敏感資料的安全日誌；異地部署須配合 HTTPS 與可信反向代理設定
 
 ## 路線圖
 

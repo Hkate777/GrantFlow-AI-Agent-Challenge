@@ -12,3 +12,5 @@ jobs:
       - run: python scripts/check_language.py
       - run: python -m pytest tests -q
       - run: python cli.py --out /tmp/kkg_out
+      # 異地部署保障：確認容器映像與健康檢查設定沒有被改壞。
+      - run: docker build -t grantflow:ci .

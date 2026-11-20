@@ -1,0 +1,13 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+output
+tests
+docs
+README.md
+TEAM_HANDOFF.md
+.github
