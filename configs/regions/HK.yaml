@@ -2,6 +2,7 @@ code: HK
 name: 香港
 languages: [zh-Hant, en]
 script: hant
+timezone: Asia/Hong_Kong
 locale_terms:
   软件: 軟件
   网络: 網絡

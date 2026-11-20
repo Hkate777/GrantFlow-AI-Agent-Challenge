@@ -22,7 +22,7 @@ from . import script as script_std
 
 _EMAIL_RE = re.compile(r"^[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}$")
 
-_SCRIPT_LABEL = {"hant": "繁體", "hans": "簡體", "latin": "拉丁字母"}
+_SCRIPT_LABEL = {"hant": "繁體", "hans": "簡體", "ja": "日文", "ko": "韓文", "latin": "拉丁字母"}
 
 
 def _text(value: str) -> str:

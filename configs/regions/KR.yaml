@@ -1,7 +1,8 @@
 code: KR
 name: 韓國
 languages: [ko, en]
-script: latin
+script: ko
+timezone: Asia/Seoul
 locale_terms: {}
 legal_keywords:
   - PIPA

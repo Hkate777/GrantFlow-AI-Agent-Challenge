@@ -2,6 +2,7 @@ code: SG
 name: 新加坡
 languages: [en, zh-Hans]
 script: latin
+timezone: Asia/Singapore
 locale_terms: {}
 legal_keywords:
   - PDPA

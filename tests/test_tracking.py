@@ -79,11 +79,15 @@ def test_future_confirmations_are_rejected_at_construction():
     """P0-11：未來日期的實付/提交確認在構造時即拒絕——舊設計（投影時靜默清空）
     會造成同一畫面二次保存丟失原輸入，已由構造期攔截取代。"""
     import pytest
+    from datetime import date, timedelta
+
+    # 以「相對今天 +3 天」動態產生未來日期，避免硬編碼日期隨時間推移失效。
+    future = (date.today() + timedelta(days=3)).isoformat()
 
     with pytest.raises(ValueError, match="不可晚於今天"):
-        track.Disbursement("首期", "2026-11-18", 50, 50, "2026-11-21")
+        track.Disbursement("首期", "2026-11-18", 50, 50, future)
     with pytest.raises(ValueError, match="不可晚於今天"):
-        track.PeriodicReport("進度報告", "2026-11-18", "2026-11-21")
+        track.PeriodicReport("進度報告", "2026-11-18", future)
 
 
 def test_periodic_reports_warn_until_submitted_and_keep_legacy_notes_unconfirmed():
@@ -175,3 +179,26 @@ def test_standalone_funding_schedule_keeps_completed_milestone_payment_unconfirm
     assert "啓動" in schedule
     assert "計劃發放：HK$50.00" in schedule
     assert "已確認發放：HK$0.00" in schedule
+
+
+def test_tracking_output_has_no_emoji():
+    """預警與管理報告不得含 emoji（項目展示規範：全倉庫不出現 emoji）。"""
+    import re
+
+    emoji = re.compile("[\U0001F300-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F]")
+    milestones = [
+        Milestone("已完成", "2026-11-01", "done"),
+        Milestone("昨日逾期", "2026-11-19"),
+        Milestone("今日到期", "2026-11-20"),
+        Milestone("日期錯誤", "2026-02-31"),
+    ]
+    status = track.project_status(milestones, today=TODAY)
+    joined = " ".join(status["alerts"])
+    assert not emoji.search(joined)
+
+    alerts = track.check_milestones(list(milestones), today=TODAY)
+    assert not emoji.search(" ".join(alerts))
+
+    report = track.management_report("APP-X", "測試項目", milestones, today=TODAY)
+    assert not emoji.search(report)
+    assert "[逾期]" in report or "[到期]" in report

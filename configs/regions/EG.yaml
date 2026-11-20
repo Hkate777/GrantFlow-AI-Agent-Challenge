@@ -2,6 +2,7 @@ code: EG
 name: 埃及
 languages: [ar, en]
 script: latin
+timezone: Africa/Cairo
 locale_terms: {}
 legal_keywords:
   - Law 151/2020

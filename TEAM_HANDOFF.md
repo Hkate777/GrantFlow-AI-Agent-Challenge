@@ -1,10 +1,12 @@
 # GrantFlow · 團隊交接說明
 
-> 更新日期：2026-11-20 ｜ **工作分支 `codex/web-workbench-merge` @ `b6e8d2f`**（已 rebase 到 `main` 最新）
+> 更新日期：2026-11-20 ｜ **主線 `main` @ `280a60f`**（所有整合、安全、字形、角色矩陣改動均已併入；本地與遠端一致、CI 全綠）
 > 倉庫：https://github.com/Hkate777/GrantFlow-AI-Agent-Challenge （舊名 KK_Garden，GitHub 自動重定向）
 > 本地檢出：`C:\Users\25345\Documents\New project\KK_Garden`
 > 本文件面向共同開發的隊友：專案現況、歷史線說明、如何接手、協作規範、風險與待辦。
 > 相關文檔：[前次交接](<C:/Users/25345/Documents/New project/GrantFlow_交接文档.md>) · [全面審評與改進清單](<C:/Users/25345/Documents/New project/GrantFlow_全面审评与改进清单.md>) · [參賽手冊](<C:/Users/25345/Desktop/个人资料/《「智賦香江」AI智能體應用大賽 參賽手冊》.pdf>)
+
+> **最新進度（2026-11-21）**：`main` 已由上而下串接——字形標準化引擎、安全護欄與加密密鑰環、權限角色矩陣 P0-07（隊友提交）、追蹤去 emoji 與日韓字形糾正、地區時區支援（當地今天判定）。提交歷史已重寫以 corrected 作者身份（`KK_ZHONG <hellokate757@gmail.com>`），目前 `main` @ `a843542`。版本號維持 **v1.1.0**（v1.2.0 已移除，安全/角色/時區改動不單獨發版，依約不急於升版）。
 
 ---
 
@@ -16,39 +18,42 @@ GrantFlow 對應「智賦香江」場景 ⑯「申請評審與項目管理流程
 
 | 項目 | 現況 |
 |---|---|
-| 測試 | **108/108 通過**（`python -m pytest tests -q`，含字形標準化 12 項） |
+| 測試 | **141/141 通過**（`python -m pytest tests -q`；含字形 15 項、安全 19 項、角色矩陣 10 項） |
 | 語言檢查 | 通過（OpenCC `s2hk` 警告模式；`data/demo` 舊簡體輸入已豁免） |
 | Web 冒煙 | `/`、`app.js`、`styles.css`、`/api/program`、`/api/regions`、`/api/cases` 全 200 |
 | 兩線整合 | **已完成**：Web 工作台線 + 多地區/隱私/導出線合併（見 §2） |
-| 乾淨安裝 | 隔離 venv 只裝 `requirements.txt` → **106/106**（依賴已鎖定相容區間並補 `httpx`/`httpx2`/`python-multipart`，CI 恢復綠燈） |
-| 身份與角色 | **P0-06/07 已落地**：所有 /api 需 HTTP Basic（初始 admin 口令見啟動日誌；演示賬號 demo/demo、reviewer_demo、approver_demo、finance_demo）；審計事件綁服務端身份，前端自填 actor 已忽略；停用即時生效；**角色矩陣**：收件/補件/複議=operator、評分=reviewer、簽發=approver、台帳=finance、賬戶管理=admin（`tests/test_roles.py` 為正負用例） |
+| 乾淨安裝 | 隔離 venv 只裝 `requirements.txt` → 全綠（依賴已鎖定相容區間並補 `httpx`/`httpx2`/`python-multipart`，CI 綠燈） |
+| 身份與角色 | **P0-06/07 已落地**（隊友提交 `76cf311`）：所有 /api 需 HTTP Basic；`_require_role()` 守衛工廠 + 六個 `ROLE_*` 常數；**角色矩陣**：收件/補件/複議=operator、評分=reviewer、簽發=approver、台帳=finance、賬戶管理=admin，admin 恆可執行一切；演示賬號 demo / reviewer_demo / approver_demo / finance_demo（口令均 demo）；`tests/test_roles.py` 為正負用例；審計綁服務端身份，前端自填 actor 已忽略，停用即時生效 |
+| 安全與私隱 | **已加固**：提示注入偵測（只標記不執行）、不可信資料隔離包裝、模型輸出審查、scrypt+HMAC 加密密鑰環（`SecretVault`，明文不落盤）、私隱出口閘門；端點 `/api/security/scan`、`/api/security/review-output`、`/api/security/vault/status`；CLI `scripts/vault_cli.py` |
+| 字形標準化 | **15 地區**配置；OpenCC `s2hk`/`s2twp`/`t2s` 逐字精確標準化 + 香港標準字白名單；`detect_script` 支援 hant/hans/ja/ko/latin；端點 `/api/script/audit`、`/api/script/regions` |
 | 實測缺陷 | **4 個已修**（截止時間/評委人數/歷史包導出/列表分頁，見 §4） |
-| 合併狀態 | **整合分支已併回 `main`**（`codex/web-workbench-merge` 與 `main` 同指向 `9f6de78`）；`v1.0.0` tag 指向合併前的 `b88a8d34`，建議打 `v1.1.0` |
+| 合併狀態 | **全部併入 `main` @ `a843542`**；本地與遠端 tree 一致（`90fa966`）、工作區乾淨、CI 全綠；`v1.0.0`/`v1.1.0` tag 保留，v1.2.0 已移除，版本號現為 v1.1.0 |
 | 人工驗收 | 完整瀏覽器流程、真實 OCR、機構資料、人工工時基線仍待驗收 |
-| 第二輪審評 | P0-01/02/03/04/05/**06**/**11** 的代碼項已修：依賴鎖定、演示入口、統一評估口徑、簽發快照、自報日期移除、台帳額度/未來日期/往返保真、**本地賬號+HTTP Basic 認證+服務端操作者+停用即時生效**（`auth.py`，提交 `4062060`）；P0-10 剩餘項與 P0-07 授權矩陣待隊友認領 |
+| 審評整改 | P0-01～07、11 的代碼項均已修（依賴鎖定、演示入口、統一評估口徑、簽發快照、自報日期移除、台帳額度/未來日期/往返保真、本地賬號+HTTP Basic+服務端操作者+停用即時生效、**角色授權矩陣 P0-07**）；剩餘 P0 多為機構人工項（OIDC/SSO、環境分離、備份演練、審計獨立保存） |
 
 ---
 
-## 2. ⚠️ 歷史線說明（接手必讀，最容易迷惑的部分）
+## 2. 歷史線說明（接手必讀，最容易迷惑的部分）
 
-這個倉庫經歷過**三條線**，接手前請理解拓撲：
+這個倉庫早期經歷過**三條線**，但**已全部收斂到單一 `main`**。接手前請理解拓撲：
 
 ```
-origin/main (b88a8d3)  ← 主線：已被重寫過一次（d705aa7 初版起步，非 KK_ZHONG 舊歷史）
-   │                     功能：多地区审查(16地区)、隐私去识别化、多模型、Excel导出、v1.0.0
+main (a843542)  ← [主線] 唯一主線：本地與遠端一致、CI 全綠
+   │              近期自上而下：字形 → 安全 → 角色矩陣（隊友）→ 去emoji/日韓字形 → 地區時區
+   │              tag：v1.0.0 / v1.1.0（v1.2.0 已移除）
    │
-   ├── codex/complete-scenario-16 (1744ba3)  ← 已淘汰：基於舊 KK_ZHONG 歷史 bd1a4fb 的工作，
-   │                                            其內容已全部以另一條路徑進入整合分支
+   ├── codex/complete-scenario-16 (1744ba3)  ← 已淘汰、僅供歷史對照
    │
-   └── codex/web-workbench-merge (b6e8d2f)  ← ★ 工作分支：main 最新 + Web 工作台全量移植
-                                              + 4 個實測缺陷修復（rebase 為單一提交）
+   └── codex/web-workbench-merge (9f6de78)   ← 已淘汰：其 Web 工作台與缺陷修復內容
+                                                已全部併入 main，勿再從此分支開新工作
 ```
 
 **要點**：
-1. `origin/main` 曾被 force push 重寫（舊 `bd1a4fb` 歷史不再位於 main 上）——不要用舊 SHA 找代碼。
-2. 我的工作（Web 工作台 + 缺陷修復）最初基於舊歷史（`1744ba3`），**已 rebase 到新 main 之上**（`b6e8d2f`）。
-3. `1744ba3` 分支保留僅供歷史對照；**新工作一律從 `main` 或 `codex/web-workbench-merge` 開分支**。
-4. 兩線融合的詳細決策記錄在提交 `b6e8d2f` 的 commit message。
+1. `origin/main` 早期曾被 force push 重寫（舊 `bd1a4fb` 歷史不再位於 main 上）——不要用舊 SHA 找代碼。
+2. 兩條 `codex/*` 分支的內容**均已併入 main**，現只剩歷史對照價值。
+3. **新工作一律從 `main` 開分支**；PR 目標為 `main`。
+4. 兩線融合的詳細決策記錄在早期提交 `b6e8d2f` / `9f6de78` 的 commit message。
+5. 2026-11-20 曾發生一次誤推送短暫覆蓋隊友的角色矩陣提交；已即時發現並以隊友提交為 parent 重建合併提交（`280a60f`）修復，現 `test_roles.py` 與 `app.py`/`auth.py` 的角色守衛完整保留、CI 全綠。教訓：推送前先 `git fetch` 確認遠端 SHA。
 
 ---
 
@@ -56,17 +61,18 @@ origin/main (b88a8d3)  ← 主線：已被重寫過一次（d705aa7 初版起步
 
 ```powershell
 Set-Location -LiteralPath 'C:/Users/25345/Documents/New project/KK_Garden'
-git fetch origin; git switch codex/web-workbench-merge   # 或 git switch main 後開新分支
+git fetch origin; git switch main             # 新工作從 main 開分支
 
-# 依賴：系統 Python 3.14（本次實測）或 CI 的 3.11；opencc 在 .venv（3.13）可用
+# 依賴：Python 3.11（CI 與本次實測）；opencc 為可選（語言檢查用）
 python -m pip install -r requirements.txt
-python -m pytest tests -q                     # 應 83/83
-& '.venv/Scripts/python.exe' scripts/check_language.py   # 應通過（警告模式）
+python -m pytest tests -q                     # 應 141/141
+python scripts/check_language.py              # 應通過（警告模式）
 
 # Web 工作台（獨立臨時 DB）
 $env:GRANTFLOW_DB = Join-Path ([IO.Path]::GetTempPath()) ('grantflow-' + [guid]::NewGuid() + '.sqlite3')
 python app.py --port 8000                     # http://127.0.0.1:8000
-                                              # 首次啟動自動建 admin/demo 賬號；瀏覽器彈出登入框輸入 demo/demo
+                                              # 首次啟動自動建 admin/demo 及三個角色演示賬號；
+                                              # 瀏覽器彈出登入框，經辦用 demo/demo，其他角色見 §1 身份與角色
 
 # CLI（多地區 + 多模型）
 python cli.py --llm mock --region HK --out <臨時目錄>
@@ -123,19 +129,20 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 | 界面 | `app.py`、`web/*`、`cli.py` | API、前端、CLI |
 | 導出與基準 | `src/kkg/export.py`、`scripts/benchmark.py`、`scripts/pitch_demo.py` | 匯出、量化、演示 |
 
-**提交規範**：commit 用英文祈使句；**禁止提交** `.env`、`data/` 之外的本地 DB、任何真實機構資料；改 `Program`/`check.py`/`review.py` 必須附全套測試與語言檢查結果；`main` 已打 `v1.0.0` tag——正式版本變更走 PR + 新 tag。
+**提交規範**：commit 用繁體中文補英文前綴（`feat:`/`fix:`/`docs:`）；**禁止提交** `.env`、任何本地 DB（`output/` 已被忽略）、任何真實機構資料；改 `Program`/`check.py`/`review.py` 必須附全套測試與語言檢查結果。**推送前必先 `git fetch origin` 確認遠端 SHA**（見 §2 第 5 點教訓）；git 的 GnuTLS 後推送不穩時改用 GitHub Git Data API。`main` 已打 `v1.0.0`/`v1.1.0` tag——正式版本變更走 PR + 新 tag，不急於升版。
 
 **PR 檢查清單**：
-- [ ] `python -m pytest tests -q` 83+/83+ 全綠
-- [ ] `scripts/check_language.py`（或 `.venv` 版）通過/無新增警告
+- [ ] `python -m pytest tests -q` 141/141 全綠
+- [ ] `scripts/check_language.py` 通過/無新增警告
 - [ ] CLI 煙測 + Web 冒煙各跑一次
+- [ ] `git fetch origin` 確認遠端無新提交後再 push
 - [ ] 涉及數字/行為變化 → 同步更新本文件 §1 與 RELEASE_NOTES
 
 ---
 
 ## 7. 已知風險與限制（如實）
 
-1. **P0 人工項未動**（審評清單）：機構 OIDC/SSO、權限矩陣、環境分離、收件連接器、備份恢復演練、審計獨立保存——接真實資料前的硬性前置，需機構決策與人工執行。
+1. **P0 人工項未動**（審評清單）：機構 OIDC/SSO、環境分離、收件連接器、備份恢復演練、審計獨立保存——接真實資料前的硬性前置，需機構決策與人工執行。（代碼側的 HTTP Basic 身份與角色矩陣 P0-06/07 已落地，但不替代機構級 OIDC/SSO。）
 2. **分頁的批次檢查僅限當前頁**：跨頁重複檢測需 P1 的持久化佇列/索引改造（`workspace.list` docstring 已注明）。
 3. **舊個案無快照**：`program_snapshot` 自本版起記錄；升級前的歷史資料在配置移除後仍會 422（遷移腳本屬 P0-08）。
 4. **`auto` 語義已收緊**：原先 auto 會自動用環境裡的外部模型密鑰，現改為恆本地。若有外部調用需求，請顯式 `--llm openai` 等。
@@ -146,13 +153,15 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 
 ## 8. 待辦（引用審評清單）
 
-- [ ] **PR**：`codex/web-workbench-merge` → `main`，隊友審查後合併（main 已有 `v1.0.0` tag，合併後建議打 `v1.1.0`）
-- [ ] P0-02/03：機構登入 + 個案級授權（代碼側最大塊，建議下一個迭代）
-- [ ] P0-05：收件時間/回執正式化（本批已打地基：`received_at` 服務端記錄）
+- [x] ~~PR 合併 `codex/web-workbench-merge` → `main`~~（已完成，現 main @ `280a60f`）
+- [x] ~~P0-06 身份認證 / P0-07 角色授權矩陣~~（已落地；`auth.py` + `app.py` + `tests/test_roles.py`）
+- [ ] P0-02/03：機構級 OIDC/SSO 登入 + 個案級授權（代碼側基本身份/角色已備，機構對接仍待）
+- [ ] P0-05：收件時間/回執正式化（已打地基：`received_at` 服務端記錄）
 - [ ] P0-08：資料遷移腳本（舊個案補 `program_snapshot`）
 - [ ] P1-05：評委最低人數在**簽發 UI**上的明確提示（後端已擋）
 - [ ] P1-16：真實瀏覽器 E2E 納入 CI
-- [ ] 全流程人工驗收（交接文檔步驟 4）：兩計劃 × 兩渠道、真實 OCR、工時基線
+- [ ] 全流程人工驗收：兩計劃 × 兩渠道、真實 OCR、工時基線
+- [ ] 決定何時把安全/角色/字形/時區改動升版至 v1.2.0（目前維持 v1.1.0，依約不急於發版）
 
 ---
 
@@ -169,26 +178,30 @@ src/kkg/
   extract.py          證據級抽取 + 跨源核對（Evidence/EvidenceSpan）
   evidence.py/money.py  欄位標籤與 HKD 金額解析
   review.py           評審彙總 + 校驗 + assess 狀態機 + review_draft
-  track.py            台帳（Disbursement/PeriodicReport/管理報告）
-  pipeline.py         編排（region/privacy 參數、errors= 匯入）
-  region.py/privacy.py  多地區審查 / 去識別化
+  track.py            台帳（Disbursement/PeriodicReport/管理報告；預警為純文字標記、無 emoji）
+  pipeline.py         編排（region/privacy 參數、errors= 匯入、intake 注入偵測）
+  region.py/privacy.py  多地區審查 / 去識別化（detect_script 支援 hant/hans/ja/ko/latin）
+  script.py           字形標準化引擎（OpenCC s2hk/s2twp/t2s + 香港白名單 + 逐處定位）
+  guard.py            安全護欄（注入偵測/輸出審查/不可信資料隔離）
+  secrets.py          加密密鑰環（scrypt+HMAC，明文不落盤）
+  auth.py             本地賬號 + HTTP Basic + 角色（P0-06/07）
   export.py           Excel 匯出
 configs/program_demo.yaml     示範計劃（HK-ACC-2027）
 configs/campus_pilot.yaml     校園試點計劃（第二套規則）
-configs/regions/*.yaml        16 地區配置
+configs/regions/*.yaml        15 地區配置
 web/                  前端（app.js/index.html/styles.css）
-scripts/              check_language.py / benchmark.py / pitch_demo.py
-tests/                83 項測試（test_workspace/test_cli/test_pipeline/test_review_fixes…）
-docs/                 architecture.md / proposal-outline.md / RELEASE_NOTES_v1.0.0.md
+scripts/              check_language.py / benchmark.py / pitch_demo.py / vault_cli.py
+tests/                141 項測試（含 test_roles/test_security/test_script/test_tracking…）
+docs/                 architecture.md / proposal-outline.md / RELEASE_NOTES_v1.0~v1.1
 ```
 
 ---
 
 ## 10. 接手第一天建議
 
-1. `git switch codex/web-workbench-merge && git pull` → `python -m pytest tests -q`（應 83/83）。
-2. 起 Web 工作台（臨時 DB），載入示範申請，檢查 002 的「待複議」狀態與評審包導出。
-3. 讀 [全面審評與改進清單](<C:/Users/25345/Documents/New project/GrantFlow_全面审评与改进清单.md>) 的 P0 表，認領一項（代碼側建議從 P0-02 登入授權開始）。
-4. 開 PR 把 `codex/web-workbench-merge` 併回 `main`——這是目前最重要的一步：整合成果只在這個分支上。
+1. `git switch main && git pull` → `python -m pytest tests -q`（應 141/141）。
+2. 起 Web 工作台（臨時 DB），用不同角色賬號登入，驗證角色矩陣：operator 可收件但不可簽發、approver 才可簽發、finance 才可動台帳。
+3. 載入示範申請，檢查 002 的「待複議」狀態、評審包導出、字形審計端點 `/api/script/audit` 與安全掃描 `/api/security/scan`。
+4. 讀 [全面審評與改進清單](<C:/Users/25345/Documents/New project/GrantFlow_全面审评与改进清单.md>) 的 P0 表，認領剩餘的人工項（OIDC/SSO、環境分離、備份演練）或 P0-08 遷移腳本。
 
 > 本專案的核心原則：**證據可追溯、決定可重現、正式通知由人簽發**。改動時守住這三條。

@@ -2,6 +2,7 @@ code: TH
 name: 泰國
 languages: [th, en]
 script: latin
+timezone: Asia/Bangkok
 locale_terms: {}
 legal_keywords:
   - PDPA

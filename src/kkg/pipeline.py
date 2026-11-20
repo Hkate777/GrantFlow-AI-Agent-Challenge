@@ -136,8 +136,10 @@ class Pipeline:
     # ---------- 階段 5：項目追蹤 ----------
     def track(self, app: Application, milestones: list[Milestone],
               periodic_reports: list[str] | None = None) -> str:
-        report = management_report(app.app_id, app.title, milestones, periodic_reports)
-        self.audit.log("track", "report", app.app_id)
+        # 以地區當地今天判斷到期/確認日期，避免沿用伺服器本地時間出錯。
+        tz = self.region.timezone if self.region else ""
+        report = management_report(app.app_id, app.title, milestones, periodic_reports, tz=tz)
+        self.audit.log("track", "report", f"{app.app_id} · tz={tz or 'local'}")
         return report
 
     def audit_json(self) -> str:

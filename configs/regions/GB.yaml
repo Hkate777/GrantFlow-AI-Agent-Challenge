@@ -2,6 +2,7 @@ code: GB
 name: 英國
 languages: [en]
 script: latin
+timezone: Europe/London
 locale_terms:
   organization: organisation
   analyze: analyse

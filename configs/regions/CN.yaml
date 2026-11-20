@@ -2,6 +2,7 @@ code: CN
 name: 中國內地
 languages: [zh-Hans]
 script: hans
+timezone: Asia/Shanghai
 locale_terms:
   軟件: 软件
   網絡: 网络

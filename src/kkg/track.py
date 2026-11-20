@@ -8,6 +8,7 @@ from decimal import Decimal
 from math import isfinite
 
 from .models import Milestone
+from .timezone import today_in_zone
 
 
 WARN_DAYS = 14
@@ -23,11 +24,15 @@ def _validate_date(value: str, field: str) -> None:
         raise ValueError(error)
 
 
-def _validate_not_future(value: str, field: str) -> None:
+def _validate_not_future(value: str, field: str, *, tz: str = "") -> None:
     """確認類日期（實付/提交）不可晚於今天——未來的「已發生」記錄是輸入錯誤，
-    靜默接受會在讀取投影時被清空，造成同一畫面二次保存丟失原輸入。"""
-    if date.fromisoformat(value) > date.today():
-        raise ValueError(f"{field}不可晚於今天（{date.today().isoformat()}）——未來的確認紀錄屬輸入錯誤。")
+    靜默接受會在讀取投影時被清空，造成同一畫面二次保存丟失原輸入。
+
+    ``tz`` 為地區 IANA 時區；傳入時以當地今天為準，否則降級到機器本地日期。
+    """
+    today = today_in_zone(tz)
+    if date.fromisoformat(value) > today:
+        raise ValueError(f"{field}不可晚於今天（{today.isoformat()}）——未來的確認紀錄屬輸入錯誤。")
 
 
 def _amount(value: float, field: str) -> Decimal:
@@ -49,6 +54,7 @@ class Disbursement:
     amount: float
     paid_amount: float = 0.0
     paid_at: str = ""
+    tz: str = ""                                   # 地區 IANA 時區，影響「今天」判定
 
     def __post_init__(self) -> None:
         _validate_date(self.due, "發放到期日")
@@ -58,7 +64,7 @@ class Disbursement:
             raise ValueError("計劃發放金額須大於零，已發放金額不得超過計劃金額")
         if self.paid_at != "":
             _validate_date(self.paid_at, "發放日期")
-            _validate_not_future(self.paid_at, "發放日期")
+            _validate_not_future(self.paid_at, "發放日期", tz=self.tz)
         if (paid > 0) != bool(self.paid_at):
             raise ValueError("請同時填寫已發放金額和發放日期")
 
@@ -70,23 +76,24 @@ class PeriodicReport:
     name: str
     due: str
     submitted_at: str = ""
+    tz: str = ""                                   # 地區 IANA 時區，影響「今天」判定
 
     def __post_init__(self) -> None:
         _validate_date(self.due, "報告到期日")
         if self.submitted_at != "":
             _validate_date(self.submitted_at, "提交日期")
-            _validate_not_future(self.submitted_at, "提交日期")
+            _validate_not_future(self.submitted_at, "提交日期", tz=self.tz)
 
 
 def _deadline_alert(label: str, due: date, today: date, warn_days: int = WARN_DAYS) -> str | None:
     days = (due - today).days
     if days < 0:
-        return f"🔴 {label}已逾期 {-days} 天"
+        return f"[逾期] {label}已逾期 {-days} 天"
     if days > warn_days:
         return None
     if days == 0:
-        return f"🟡 {label}今天到期（{due}）"
-    return f"🟡 {label}將於 {days} 天後到期（{due}）"
+        return f"[到期] {label}今天到期（{due}）"
+    return f"[將到期] {label}將於 {days} 天後到期（{due}）"
 
 
 def _milestone_state(milestone: Milestone, today: date, warn_days: int) -> tuple[str, str | None]:
@@ -94,7 +101,7 @@ def _milestone_state(milestone: Milestone, today: date, warn_days: int) -> tuple
     try:
         due = datetime.strptime(milestone.due, "%Y-%m-%d").date()
     except (TypeError, ValueError):
-        return milestone.status, f"⚠️ {label}日期格式異常（{milestone.due}）"
+        return milestone.status, f"[警示] {label}日期格式異常（{milestone.due}）"
     if milestone.status == "done":
         return "done", None
     alert = _deadline_alert(label, due, today, warn_days)
@@ -106,9 +113,9 @@ def _milestone_state(milestone: Milestone, today: date, warn_days: int) -> tuple
 
 
 def check_milestones(ms: list[Milestone], today: date | None = None,
-                     warn_days: int = WARN_DAYS) -> list[str]:
-    """檢查里程碑，並更新逾期記錄的狀態。"""
-    today = today or date.today()
+                     warn_days: int = WARN_DAYS, *, tz: str = "") -> list[str]:
+    """檢查里程碑，並更新逾期記錄的狀態。``tz`` 指定地區時區的當地今天。"""
+    today = today or today_in_zone(tz)
     alerts: list[str] = []
     for milestone in ms:
         status, alert = _milestone_state(milestone, today, warn_days)
@@ -117,6 +124,22 @@ def check_milestones(ms: list[Milestone], today: date | None = None,
         if alert:
             alerts.append(alert)
     return alerts
+
+
+def _resolve_tz(tz: str, periodic_reports: Iterable[object] | None,
+                disbursements: Iterable[object] | None) -> str:
+    """解析時區：显式傳入優先；否則從記錄物件自帶的 tz 欄位推斷。
+
+    舊資料（無 tz 欄位）回傳空字串，由 today_in_zone 降級到機器本地日期，
+    保持向後相容。
+    """
+    if tz:
+        return tz
+    for obj in [*(periodic_reports or []), *(disbursements or [])]:
+        z = getattr(obj, "tz", "")
+        if z:
+            return z
+    return ""
 
 
 def _confirmed_date(value: str, today: date) -> str:
@@ -135,9 +158,11 @@ def _total_amount(values: Iterable[float]) -> float:
 def project_status(milestones: list[Milestone],
                    periodic_reports: list[PeriodicReport | str] | None = None,
                    disbursements: list[Disbursement] | None = None, *,
-                   today: date | None = None) -> dict:
-    """按指定日期計算項目狀態，保留原始記錄。"""
-    today = today or date.today()
+                   today: date | None = None, tz: str = "") -> dict:
+    """按指定日期計算項目狀態，保留原始記錄。``tz`` 指定地區時區的當地今天，
+    未傳時會從記錄物件自帶的時區推斷。"""
+    tz = _resolve_tz(tz, periodic_reports, disbursements)
+    today = today or today_in_zone(tz)
     alerts: list[str] = []
     milestone_rows = []
     for milestone in milestones:
@@ -222,17 +247,18 @@ def _funding_totals(funding: dict[str, float]) -> str:
             f"已確認發放：HK${funding['paid']:,.2f}**")
 
 
-def funding_schedule(ms: list[Milestone]) -> str:
-    status = project_status(ms)
+def funding_schedule(ms: list[Milestone], *, tz: str = "") -> str:
+    status = project_status(ms, tz=tz)
     return "\n".join([*_milestone_table(status["milestones"]), "", _funding_totals(status["funding"])])
 
 
 def management_report(app_id: str, title: str, ms: list[Milestone],
                       periodic_reports: list[PeriodicReport | str] | None = None, *,
                       disbursements: list[Disbursement] | None = None,
-                      today: date | None = None) -> str:
-    today = today or date.today()
-    status = project_status(ms, periodic_reports, disbursements, today=today)
+                      today: date | None = None, tz: str = "") -> str:
+    tz = _resolve_tz(tz, periodic_reports, disbursements)
+    today = today or today_in_zone(tz)
+    status = project_status(ms, periodic_reports, disbursements, today=today, tz=tz)
     lines = [
         f"# 項目管理報告 · {app_id}",
         "",
@@ -267,5 +293,5 @@ def management_report(app_id: str, title: str, ms: list[Milestone],
         for row in status["periodic_reports"]
     ])
     lines += ["", "## 預警"]
-    lines += [f"- {alert}" for alert in status["alerts"]] or ["- ✅ 暫無到期預警。"]
+    lines += [f"- {alert}" for alert in status["alerts"]] or ["- [正常] 暫無到期預警。"]
     return "\n".join(lines)

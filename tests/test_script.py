@@ -120,3 +120,41 @@ def test_script_audit_rejects_unknown_region(tmp_path):
     client = _client(tmp_path / "script.sqlite3")
     resp = client.post("/api/script/audit", json={"text": "软件", "region": "XX"})
     assert resp.status_code == 404
+
+
+def test_detect_script_ja_ko_and_chinese():
+    """字形偵測須正確區分日文假名、韓文諺文、繁簡中文與拉丁字母。"""
+    from kkg.region import detect_script
+
+    assert detect_script("申請書を提出します。個人情報保護法") == "ja"
+    assert detect_script("カタカナと漢字の混合文") == "ja"
+    assert detect_script("개인정보 보호법에 따라 신청서를 제출") == "ko"
+    assert detect_script("體網絡資料軟件資訊與對於這個") == "hant"
+    assert detect_script("体网络资料软件信息与对于这个") == "hans"
+    assert detect_script("Please submit the application form") == "latin"
+
+
+def test_ja_ko_region_scripts_are_factual():
+    """日韓地區的 script 標記須符合事實，不再借用繁體/拉丁標籤。"""
+    from kkg.region import Region
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "configs" / "regions"
+    assert Region.load(root / "JP.yaml").script == "ja"
+    assert Region.load(root / "KR.yaml").script == "ko"
+
+
+def test_japanese_doc_no_longer_flagged_as_traditional_in_jp():
+    """日文申請在日本地區不應被誤報為繁簡字形不一致。"""
+    from kkg.check import check_region
+    from kkg.region import Region
+    from kkg.models import Application, Document, DocType
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "configs" / "regions"
+    jp = Region.load(root / "JP.yaml")
+    doc = Document(path="a.md", name="proposal.md", doc_type=DocType.MARKDOWN,
+                   text="個人情報保護法に従い、ソフトウェアを開発し、情報システムを構築します。")
+    app = Application(app_id="APP-JP", program="HK-ACC-2027", title="申請書", applicant="A", docs=[doc])
+    findings = check_region(app, jp)
+    assert not any(f.source == "region.language" for f in findings)

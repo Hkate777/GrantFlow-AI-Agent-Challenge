@@ -2,6 +2,7 @@ code: AE
 name: 阿拉伯聯合酋長國
 languages: [ar, en]
 script: latin
+timezone: Asia/Dubai
 locale_terms: {}
 legal_keywords:
   - PDPL

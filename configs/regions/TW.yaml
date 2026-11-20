@@ -2,6 +2,7 @@ code: TW
 name: 中國台灣
 languages: [zh-Hant]
 script: hant
+timezone: Asia/Taipei
 locale_terms:
   软件: 軟體
   网络: 網路

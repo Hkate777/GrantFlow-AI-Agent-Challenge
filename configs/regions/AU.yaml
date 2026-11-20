@@ -2,6 +2,7 @@ code: AU
 name: 澳洲
 languages: [en]
 script: latin
+timezone: Australia/Sydney
 locale_terms:
   organization: organisation
   analyze: analyse

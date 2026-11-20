@@ -9,7 +9,8 @@
   5. benchmark_report.md量化基準報告
   6. script_audit.md字形標準化示範（港澳台內地逐處定位與修正）
   7. security_guard.md安全防護示範（提示注入攔截 + 密鑰環 + 輸出閘門）
-  8. demo_script.md演示腳本（含建議講解順序與時間分配）
+  8. timezone_audit.md地區時區示範（各地當地今天與跨日判定）
+  9. demo_script.md演示腳本（含建議講解順序與時間分配）
 
 用法：
     python scripts/pitch_demo.py
@@ -27,6 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from kkg import guard as guard_std                          # noqa: E402
 from kkg import script as script_std                        # noqa: E402
 from kkg import secrets as secrets_std                      # noqa: E402
+from kkg import timezone as tz_std                          # noqa: E402
 from kkg.llm import get_llm                                 # noqa: E402
 from kkg.models import Milestone, ReviewScore                # noqa: E402
 from kkg.pipeline import Pipeline, load_applications
@@ -163,6 +165,29 @@ def main() -> None:
     ]
     (out / "security_guard.md").write_text("\n".join(sec_lines), encoding="utf-8")
 
+    # 地區時區示範：同一瞬間各地當日不同，展示到期/確認日期按地區判定。
+    from datetime import datetime, timezone as dt_timezone
+    instant = datetime.now(dt_timezone.utc).replace(microsecond=0)
+    tzcodes = ["HK", "TW", "CN", "SG", "JP", "KR", "GB", "US", "CA", "AU"]
+    tz_lines = [
+        "# 地區時區示範",
+        "",
+        f"同一時刻（UTC {instant.isoformat()}），Agent 為各地區換算當地今天：",
+        "",
+        "| 地區 | IANA 時區 | 當地今天 |",
+        "|---|---|---|",
+    ]
+    for code in tzcodes:
+        zone = tz_std.zone_for_region(code)
+        tz_lines.append(f"| {code} | {zone} | {tz_std.today_in_zone(zone).isoformat()} |")
+    tz_lines += [
+        "",
+        "同一張申請的「確認日期不可晚於今天」與里程碑到期預警，一律按申請所屬地區的當地今天判定，",
+        "避免因執行機器本地時區而跨日誤判；時區資料缺失時安全降級到機器本地日期。",
+        "",
+    ]
+    (out / "timezone_audit.md").write_text("\n".join(tz_lines), encoding="utf-8")
+
     script = f"""# 決賽演示腳本（建議8分鐘）
 
 核心賣點：**能把整條資助行政工作流交給智能體，但把最終決定權留給人**。兩個入口（命令行批次 + 網頁工作台）共用同一套規則引擎。
@@ -176,8 +201,9 @@ def main() -> None:
 | 5. 安全防護 | 0.8 min | 打開 `security_guard.md`：展示惡意申請（忽略指令/境外外傳/命令注入）被偵測標記為需人工覆核，模型輸出含提示洩漏或明文憑據即攔截；示範 API 憑據存於加密密鑰環（明文不落盤、篡改即拒絶）。強調「不被惡意引導、私隱不外洩」。 |
 | 6. 評審資料包與彙總 | 1 min | 打開 `review_packs/APP-2027-003/`（摘要 + 一頁簡介 + 核對清單，欄位附原文佐證且已去識別化）與 `review_summary.xlsx`（三個工作表）；展示 APP-2027-002 分歧 41 分觸發複議。 |
 | 7. 工作台與人工簽發 | 2 min | `python app.py` 開啟工作台：登入後逐步操作個案——補件、評分、複議記錄、人工簽發；示範評委人數不足 / 逾期個案會被擋住簽發；強調正式通知只在人簽發時生成，系統永不自動發出。 |
-| 8. 項目追蹤 | 0.5 min | 展示 `tracking/` 管理報告：里程碑逾期與資助發放預警；台帳撥款合計不得超核准額度。 |
-| 9. 量化成效 | 0.5 min | 展示 `benchmark_report.md`：單份平均 < 1 秒、異常檢出率 100%、100 份推算 1 分鐘內；127/127 測試全綠。 |
+| 8. 項目追蹤 | 0.5 min | 展示 `tracking/` 管理報告：里程碑逾期與資助發放預警；台帳撥款合計不得超核准額度；到期與確認日期按地區當地今天判定。 |
+| 9. 地區時區 | 0.4 min | 打開 `timezone_audit.md`：同一時刻各地當地今天不同（香港已 11-21、紐約仍 11-20）；確認日期與到期預警按申請所屬地區判定，不沿用伺服器本地時間。 |
+| 10. 量化成效 | 0.5 min | 展示 `benchmark_report.md`：單份平均 < 1 秒、異常檢出率 100%、100 份推算 1 分鐘內；148/148 測試全綠。 |
 
 > 決賽PPT必須英文；本腳本為中文排練指引，英文講稿可據此翻譯。
 > 演示提示：MockLLM保證離線可重現；如需展示真模型，設定OPENAI_API_KEY後加 `--llm openai`。
@@ -191,6 +217,7 @@ def main() -> None:
 - 基準報告 至 `benchmark_report.md`
 - 字形標準化示範 至 `script_audit.md`
 - 安全防護示範 至 `security_guard.md`
+- 地區時區示範 至 `timezone_audit.md`
 - 審計日誌 至 `audit_log.json`
 """
     (out / "demo_script.md").write_text(script, encoding="utf-8")

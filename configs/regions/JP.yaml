@@ -1,7 +1,8 @@
 code: JP
 name: 日本
 languages: [ja, en]
-script: hant
+script: ja
+timezone: Asia/Tokyo
 locale_terms:
   網絡: ネットワーク
   軟件: ソフトウェア

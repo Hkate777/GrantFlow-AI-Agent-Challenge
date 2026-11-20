@@ -15,10 +15,11 @@ GrantFlow面向大學、科技園、創投機構及創新創業支援單位，�
 - **評審資料包**：自動生成標準化申請摘要、一頁式項目簡介、評審核對清單（Reviewer Pack）
 - **評審彙總**：按維度權重計算加權總分，自動識別評分分歧並觸發複議建議，生成評審進度草稿與後續待辦
 - **人工簽發工作台**：個案狀態機自動推導「待補件、資格待核、待評分、評分待更正、待複議、評審人數不足、待人工覆核、待簽發」；補件、評分、複議記錄、簽發各有版本號防衝突；截止時間以服務端收件時間為準，評委人數不足或規則快照不符會擋住簽發
-- **帳號與權限**：本機帳號、HTTP Basic 登入、scrypt 加鹽口令；停用帳號即時撤銷全部工作階段；工作台操作綁定服務端操作員身份
+- **帳號與權限**：本機帳號、HTTP Basic 登入、scrypt 加鹽口令；停用帳號即時撤銷全部工作階段；工作台操作綁定服務端操作員身份；角色權限矩陣（operator 收件、reviewer 評分、approver 簽發、finance 台帳、admin 全部）落實職責分離
 - **項目追蹤**：里程碑、資助發放、定期報告跟蹤，撥款合計不得超出核准額度，逾期/臨期自動預警，輸出管理報告
 - **全程可審計**：每個Agent動作寫入審計日誌，關鍵節點標記為需人工複核
 - **多地區審查**：內置15個地區（中國香港、中國台灣、中國內地、新加坡、美國、英國、澳洲、加拿大、日本、韓國、阿聯酋、沙特、馬來西亞、泰國、埃及），Agent按地區載入語言字形、當地法規、貨幣格式及評審慣例；法規依據真實法律（UK GDPR、Privacy Act 1988、PIPEDA、PDPL、Law 151/2020 等）
+- **地區時區**：每區附 IANA 時區，里程碑到期、撥款/報告的「確認日期不可晚於今天」一律按申請所屬地區的當地今天判斷，不沿用伺服器本地時間；同一時刻港澳台已跨日而英美仍舊日時，各地判定各自正確；缺 tzdata 時安全降級
 - **私隱與商業敏感防護**：送模型前先去識別化，電郵、電話、身份證、銀行卡、合約編號等以不可逆佔位符取代，原始值不離開本機；對外評審包、Excel總表與審計日誌均無明文敏感資訊
 - **多模型可插拔**：Mock離線可復現，亦支持 OpenAI 兼容端點、Anthropic Claude、Google Gemini；`--llm auto` 按已配置的API Key自動選擇，無密鑰時優雅降級
 
@@ -51,6 +52,21 @@ GrantFlow面向大學、科技園、創投機構及創新創業支援單位，�
 - **人機協同**：輸出修正建議與標準化文本，是否套用由人工決定。
 
 書面應用：命令行 `--region` 指定地區時，intake 階段自動做字形審計並寫入審計日誌；Web 工作台提供 `POST /api/script/audit`（提交文字與地區，回傳逐處修正建議）與 `GET /api/script/regions`。測試見 `tests/test_script.py`。
+
+## 地區時區（跨境日期判定）
+
+同一瞬間各地日期可能不同：UTC 18:00 時香港、台灣、內地、新加坡、日本、韓國、澳洲已是翌日，而英國、美國、加拿大仍屬當日。若用執行機器的本地時間判斷到期或「確認日期是否晚於今天」，跨區申請會被跨日誤判。`timezone.py` 為 15 區提供 IANA 時區映射，`Region.today()` 回傳當地今天，追蹤模組（`track.py`）的到期預警與確認日期校驗一律按地區當地日期判定：
+
+```python
+from kkg.region import Region
+from kkg.timezone import region_today, today_in_zone
+
+hk = Region.load("configs/regions/HK.yaml")
+assert hk.today() == today_in_zone("Asia/Hong_Kong")   # 香港當地今天
+region_today("US")                                      # 紐約當地今天
+```
+
+Pipeline 追蹤階段傳入 `region.timezone`；Web/CLI 處理含時區標記的舊個案時，從記錄自動推斷時區；時區資料缺失時安全降級到機器本地日期，不中斷流程。測試見 `tests/test_timezone.py`（7 項）。
 
 
 ## 安全與私隱防護（不被惡意引導 · 私隱不外洩）
@@ -197,10 +213,11 @@ flowchart LR
 │   ├── script.py               # 地區字形標準化引擎（逐處定位 + 白名單）
 │   ├── program.py              # 計劃規則模型（含快照重建）
 │   ├── models.py               # 數據模型 + 審計日誌
-│   ├── region.py               # 地區模型 + 字形檢測
+│   ├── region.py               # 地區模型 + 字形檢測 + 當地日期
+│   ├── timezone.py             # 15 地區 IANA 時區映射 + 當地今天判定（降級容錯）
 │   └── export.py               # 評審彙總 Excel 匯出（三個工作表，敏感欄位脫敏）
 ├── cli.py                      # 命令行一鍵跑通全流程
-├── app.py                      # FastAPI Web 工作台（create_app 工廠 + 近20個 API）
+├── app.py                      # FastAPI Web 工作台（create_app 工廠 + 24 個 API）
 ├── web/                        # 工作台前端（index.html/app.js/styles.css）
 ├── scripts/
 │   ├── check_language.py       # 語言規範檢查（預設警告，--strict 嚴格）
@@ -208,7 +225,7 @@ flowchart LR
 │   ├── export_summary.py       # 匯出評審總覽 Excel
 │   ├── vault_cli.py            # 加密密鑰環管理（set/get/list/delete/verify）
 │   └── pitch_demo.py           # 一鍵生成決賽演示全套物料：output/pitch/
-├── tests/                      # 127 項端到端測試（含 19 項安全測試）
+├── tests/                      # 148 項端到端測試（含 19 項安全、7 項時區測試）
 ├── TEAM_HANDOFF.md             # 團隊交接説明（現況/歷史線/設計決策/分工）
 └── docs/                       # 架構説明 / 計劃書大綱 / 版本説明 / 評審映射
 ```
@@ -255,7 +272,7 @@ python scripts/pitch_demo.py    # 一鍵生成全套決賽物料（含 8 分鐘�
 - [ ] IMAP 伺服器定時拉取與附件自動歸檔（現支援 `.eml` 手動匯入）
 - [ ] 圖片OCR與視頻轉寫（接入多模態模型）
 - [ ] 評審意見情感分析與評分校準建議
-- [ ] 機構 OIDC/SSO 登入與個案級權限矩陣（現為本機帳號）
+- [ ] 機構 OIDC/SSO 登入（現為本機帳號；**角色權限矩陣已落地**：operator/reviewer/approver/finance/admin 職責分離，見 `tests/test_roles.py`）
 - [ ] MCP工具封裝，供其他Agent調用複用
 
 ---

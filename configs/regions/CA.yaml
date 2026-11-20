@@ -2,6 +2,7 @@ code: CA
 name: 加拿大
 languages: [en, fr]
 script: latin
+timezone: America/Toronto
 locale_terms:
   organization: organisation
   analyze: analyse
