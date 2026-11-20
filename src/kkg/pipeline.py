@@ -61,10 +61,19 @@ class Pipeline:
         findings = check_completeness(app, self.prog)
         findings += cross_verify(app, extracted)
         if self.region:
-            from .check import check_region
+            from .check import check_region, normalize_for_region
+            from . import script as script_std
             findings += check_region(app, self.region)
             extracted["_region"] = self.region.name
             extracted["_region_conventions"] = self.region.review_conventions
+            # 字形標準化：為下游輸出提供符合地區標準的文本，並記錄逐處審計。
+            if self.region.code in script_std.supported_regions():
+                corpus = "\n".join(d.text for d in app.docs if d.text)
+                if corpus:
+                    audit = script_std.audit_text(corpus, self.region.code)
+                    extracted["_script_target"] = audit.target_label
+                    extracted["_script_normalized"] = normalize_for_region(corpus, self.region)
+                    self.audit.log("script", audit.summary(), self.region.code)
             self.audit.log("region", "applied", self.region.code)
         self.audit.log("check", "done", f"findings={len(findings)}")
         return extracted, findings

@@ -16,7 +16,7 @@ GrantFlow 對應「智賦香江」場景 ⑯「申請評審與項目管理流程
 
 | 項目 | 現況 |
 |---|---|
-| 測試 | **96/96 通過**（`python -m pytest tests -q`，含第三輪回歸） |
+| 測試 | **108/108 通過**（`python -m pytest tests -q`，含字形標準化 12 項） |
 | 語言檢查 | 通過（OpenCC `s2hk` 警告模式；`data/demo` 舊簡體輸入已豁免） |
 | Web 冒煙 | `/`、`app.js`、`styles.css`、`/api/program`、`/api/regions`、`/api/cases` 全 200 |
 | 兩線整合 | **已完成**：Web 工作台線 + 多地區/隱私/導出線合併（見 §2） |

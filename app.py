@@ -30,6 +30,7 @@ from kkg.models import Finding, FindingType, Milestone, ReviewScore, Severity
 from kkg.pipeline import Pipeline, load_applications
 from kkg.program import Program
 from kkg.region import Region
+from kkg import script as script_std
 from kkg.storage import CaseStore, MissingCase, WorkspaceConflict
 from kkg.submission import MAX_FILES, MAX_FILE_BYTES, MAX_METADATA_BYTES, MAX_UPLOAD_BYTES, read_message, read_metadata
 from kkg.summarize import reviewer_pack
@@ -63,6 +64,11 @@ class ResolutionInput(Revision):
 
 class DecisionInput(ResolutionInput):
     outcome: Literal["approved", "declined"]
+
+
+class ScriptAuditInput(Input):
+    text: str = Field(max_length=200_000)
+    region: str = Field(max_length=8)
 
 
 class LoginInput(Input):
@@ -345,6 +351,21 @@ def create_app(database: str | Path | None = None, configs: Path | None = None) 
     @api.get("/api/regions")
     def demo_regions() -> list[dict]:
         return [{"code": region.code, "name": region.name} for region in regions.values()]
+
+    @api.post("/api/script/audit")
+    def script_audit(payload: ScriptAuditInput, identity: Identity = Depends(_require_identity)):
+        """字形審計：精確定位不符合地區標準的字形並給出逐字修正建議。"""
+        region = regions.get(payload.region.upper())
+        if region is None:
+            raise HTTPException(404, f"不支援的地區：{payload.region}")
+        report = script_std.audit_text(payload.text, region.code)
+        return report.as_dict()
+
+    @api.get("/api/script/regions")
+    def script_regions(identity: Identity = Depends(_require_identity)):
+        """列出可做字形標準化的地區及其目標字形標籤。"""
+        return [{"code": code, "target": script_std.target_label(code)}
+                for code in script_std.supported_regions()]
 
     @api.get("/api/run")
     def demo_run(region: str = "HK"):

@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""語言規範檢查：提示本倉庫文字檔是否符合「繁體中文（香港標準）或英文」。
+"""展示語言一致性輔助工具（可選）：提示本倉庫文字檔的用字風格。
+
+本項目展示語言為香港繁體或英文皆可、以嚴謹清晰為準，不強制一律繁體。
+本腳本只作「一致性參考」，不是合規閘門，也不約束 Agent 的處理能力
+（Agent 的字形標準化由 src/kkg/script.py 負責，要求是絕對正確）。
 
 檢查兩項：
 1. 簡體字：以OpenCC s2hk轉換原文，結果不同即提示可能含簡體字。
-2. 香港標準術語：提示台灣地區慣用語、內地書面語等非香港用字（見HK_TERMS）。
+2. 非香港術語：提示台灣地區慣用語、內地書面語（見HK_TERMS）。
 
-預設為**警告模式**：只列印提示，不退出的非零狀態，不阻塞CI。
-使用 --strict才會在有問題時以狀態碼1結束（適合本地提交前自查）。
+預設為**警告模式**：只列印提示，不返回非零狀態，不阻塞CI。
+使用 --strict才會在有問題時以狀態碼1結束（適合本地自查）。
 
 注意：OpenCC轉換規則偶有誤判（例如把香港標準「說明」轉為「説明」），
-因此CI採用警告模式；隊友可自行判斷是否為誤報。
+因此提示僅供人工參考；英文技術文件與地區配置無須強行轉繁。
 
 用法：
     python scripts/check_language.py           # 警告模式（CI預設）
@@ -50,7 +54,7 @@ HK_SPELLING_ALLOWED: dict[str, str] = {
 ROOT = Path(__file__).resolve().parent.parent
 converter = opencc.OpenCC("s2hk")
 
-parser = argparse.ArgumentParser(description="語言規範檢查（預設只警告）")
+parser = argparse.ArgumentParser(description="展示語言一致性輔助檢查（可選，預設只警告）")
 parser.add_argument("--strict", action="store_true", help="發現問題時以狀態碼1結束")
 args = parser.parse_args()
 
@@ -92,4 +96,4 @@ if errors:
     if args.strict:
         sys.exit(1)
 else:
-    print(f"語言檢查通過：{len(files)}個檔案均為繁體中文（香港標準）或英文 [通過]")
+    print(f"一致性提示檢查完成：{len(files)}個檔案未發現簡體或非香港用字 [通過]")

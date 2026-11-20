@@ -18,6 +18,7 @@ from .models import Application, Finding, FindingType, Severity
 from .money import parse_hkd
 from .program import Program
 from .region import Region, detect_script
+from . import script as script_std
 
 _EMAIL_RE = re.compile(r"^[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}$")
 
@@ -66,14 +67,28 @@ def check_region(app: Application, region: Region) -> list[Finding]:
     title_blob = app.title + " " + " ".join(str(v) for v in app.fields.values())
     full = (title_blob + " " + corpus).lower()
 
-    # 1. 語言一致性：只有含中日韓文字的內容才做字形比對，純拉丁字母地區不誤報。
+    # 1. 字形審計：精確定位每一處不符合地區標準的字形，給出逐字修正建議。
+    #    僅對含中日韓文字的內容處理，純拉丁字母地區不誤報。
     script = detect_script(corpus or app.title)
-    if script != "latin" and script != region.script:
-        findings.append(Finding(
-            FindingType.FORMAT, Severity.WARNING,
-            f"地區「{region.name}」期望{_SCRIPT_LABEL.get(region.script, region.script)}字形，"
-            f"申請內容為{_SCRIPT_LABEL.get(script, script)}，建議統一",
-            source="region.language", needs_human=False))
+    if script != "latin":
+        # 優先按地區代碼做精確標準化（HK/TW/CN/SG）；其餘地區退回粗略字形判定。
+        if region.code in script_std.supported_regions():
+            audit = script_std.audit_text(corpus or app.title, region.code)
+            if audit.change_count:
+                findings.append(Finding(
+                    FindingType.FORMAT, Severity.WARNING,
+                    audit.summary(),
+                    detail="；".join(
+                        f"第{e.line}行第{e.column}字「{e.original}」建議改為「{e.suggested}」"
+                        for e in audit.edits[:10]
+                    ),
+                    source="region.script", needs_human=False))
+        elif script != region.script:
+            findings.append(Finding(
+                FindingType.FORMAT, Severity.WARNING,
+                f"地區「{region.name}」期望{_SCRIPT_LABEL.get(region.script, region.script)}字形，"
+                f"申請內容為{_SCRIPT_LABEL.get(script, script)}，建議統一",
+                source="region.language", needs_human=False))
 
     # 2. 當地法規：建議性提示，列出該地區的合規框架供申請人對照，不視為硬性缺失。
     if region.legal_keywords and corpus:
@@ -103,6 +118,14 @@ def check_region(app: Application, region: Region) -> list[Finding]:
             source="region.format"))
 
     return findings
+
+
+def normalize_for_region(text: str, region: Region) -> str:
+    """將文字標準化到地區字形，供對外輸出/預覽使用。
+
+    地區不支援字形標準化或缺少依賴時原樣回傳；是否套用由呼叫端決定。
+    """
+    return script_std.normalize_text(text, region.code)
 
 
 def _field_findings(app: Application, prog: Program) -> list[Finding]:
