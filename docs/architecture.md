@@ -26,28 +26,66 @@
 
 ## 2. 模塊職責
 
+### 核心 Agent（七步流水線）
+
 | 模塊 | 職責 | 關鍵設計 |
 |---|---|---|
 | `ingest.py` | 多格式解析 | 每種格式獨立解析器；依賴可選、失敗不中斷（`error` 字段） |
 | `extract.py` | LLM 結構化抽取 | JSON 輸出 + 解析容錯降級；Mock/真實 LLM 同接口 |
-| `check.py` | 完整性/合規審查 | 規則引擎按 YAML 執行；利益衝突用「評審人至關鍵詞」映射 |
+| `evidence.py` | 欄位原文佐證 | 中英日標籤別名表 + 繁簡容錯；輸出 `EvidenceSpan`（出處/引文/值） |
+| `money.py` | 港幣金額解析 | 支援千/萬/百萬/億與 HK$、港元；拒絕布林與非有限數 |
+| `check.py` | 完整性/合規審查 | 規則引擎按 YAML 執行；利益衝突用「評審人 → 關鍵詞」映射 |
 | `extract.py::cross_verify` | 跨源比對 | 數值容差 5%；標題/郵箱雙向包含匹配 |
 | `extract.py::anomaly_scan` | 批次異常 | 中位數 ± 5×MAD 穩健離羣檢測 |
 | `summarize.py` | 摘要與資料包 | 模板化 + LLM 凝練；輸出 summary/one_pager/checklist |
-| `review.py` | 評審彙總 | 維度歸一百分制加權；總分差 ≥ 閾值觸發複議 |
-| `track.py` | 項目追蹤 | 逾期/臨期（14 天）兩級預警；資助發放進度表 |
-| `pipeline.py` | 編排 | 階段式 Agentic Workflow，全程 AuditTrail |
-| `llm.py` | LLM 抽象 | Protocol 接口；Mock（離線啓發式）/ OpenAI 兼容端點 |
+| `review.py` | 評審彙總與狀態機 | 維度歸一百分制加權；分歧閾值觸發複議；`assess` 的 holds 順序即狀態語義 |
+| `track.py` | 項目追蹤 | 逾期/臨期（14 天）兩級預警；資助發放進度表；台帳寫入校驗 |
+
+### 支撐層（工作台、持久化、安全、編排）
+
+| 模塊 | 職責 | 關鍵設計 |
+|---|---|---|
+| `pipeline.py` | 批次編排 | 階段式 Agentic Workflow，全程 AuditTrail |
+| `workspace.py` | 個案生命週期 | 收件/補件/評分/複議/人工簽發/資助台帳；版本號防衝突；程序快照隨案 |
+| `storage.py` | SQLite 持久化 | 串行化寫入（`BEGIN IMMEDIATE`）、版本衝突、分頁查詢 |
+| `submission.py` | 安全收件 | 表單 JSON 校驗、附件數量/大小上限、`.eml` 解析、SHA-256 指紋冪等 |
+| `auth.py` | 帳號與身份 | scrypt 加鹽口令、HTTP Basic、工作階段 TTL、停用即撤銷全部工作階段 |
+| `llm.py` | LLM 抽象 | Protocol 接口；Mock/OpenAI 兼容/Anthropic/Gemini；`auto` 恆本地 |
+| `privacy.py` | 私隱去識別化 | 送模型前遮蔽 PII，內存映射不落盤，輸出前還原 |
+| `program.py` | 計劃規則模型 | YAML 載入；`from_snapshot` 從個案快照重建規則 |
+| `region.py` | 地區模型 | 字形檢測；15 地區配置載入 |
+| `export.py` | Excel 匯出 | 三個工作表（總覽/發現明細/評分明細），敏感欄位脫敏 |
 
 ## 3. 數據流
 
-申請目錄（meta.json + 附件）至 `load_applications` 至 `Application(docs=[Document...])`
-至intake產出 `extracted: dict` + `findings: [Finding]`
-至build_packs產出評審資料包目錄
-至review消費 `ReviewScore[]` 產出加權結果/通知/待辦
-至track消費 `Milestone[]` 產出管理報告
+系統有兩個入口，共用同一套規則引擎與狀態機：
 
-所有中間產物落盤（Markdown/JSON），天然支持「斷點續跑」與人工介入。
+**入口一：命令行批次全流程**（`cli.py` → `Pipeline`）
+
+```
+申請目錄（meta.json + 附件）
+  → load_applications → Application(docs=[Document...])
+  → intake → extracted: dict + findings: [Finding]
+  → batch_checks → 批次級查重 / 離羣發現
+  → build_packs → 評審資料包目錄（對外一律去識別化）
+  → review（消費 ReviewScore[]）→ assess 狀態機 + 評審進度草稿 + 待辦
+  → track（消費 Milestone[]）→ 管理報告
+```
+
+所有中間產物落盤（Markdown/JSON），天然支持「斷點續跑」與人工介入。命令行只產出評審進度草稿（`review_draft`），不發正式通知。
+
+**入口二：Web 工作台個案生命週期**（`app.py` → `Workspace`）
+
+```
+submit（表單/.eml/資料夾）→ 建立個案（含計劃快照 + 服務端收件時間）
+  → _evaluate → 完整性/資格/截止/規則版本/批次發現 → assess 狀態機
+  → amend（補件，清空舊評分）→ score（評分，校驗維度與人數下限）
+  → resolve（記錄複議/人工覆核，綁定評估 basis）
+  → sign（人工簽發，鎖定規則快照 + 生成正式結果通知）
+  → track（資助台帳：里程碑/撥款/定期報告，攢款不得超核准額）
+```
+
+每次操作都做版本號檢查（`revision`），過期操作被拒絕；`_evaluate` 對已簽發個案直接回傳簽發時的 assessment 與 findings，保證歷史結果不隨規則更新而漂移。
 
 ## 4. 多地區審查
 
@@ -70,9 +108,37 @@ Region模型以yaml描述各地語言、法規、格式及評審慣例。Pipelin
 
 各地配置載入真實合規要求，例如英國UK GDPR與Data Protection Act、澳洲Privacy Act與APP、加拿大PIPEDA、日本APPI、韓國PIPA、中東與東南亞的PDPL及PDPA；Agent按地區自動切換審查視角，無需修改程式。所有地區檢查均為建議性提示，由人工確認適用性。
 
-## 5. 擴展點
+## 5. 人工簽發與狀態機
+
+這是本項目「負責任AI」的核心：智能體只做檢查與建議，**正式結果通知永不由系統自動發出**。
+
+**holds 順序即狀態語義**（`review.assess`）：按固定優先級把未解決事項排序，`status = holds[0]`：
+
+```
+pending_deliberation（待複議）
+  → needs_materials（待補件）
+  → needs_compliance（資格待核）
+  → invalid_scores（評分待更正）
+  → pending_scores（待評分）
+  → insufficient_reviews（評審人數不足）
+  → needs_review（待人工覆核）
+```
+
+調整順序會改變個案首選狀態與測試，必須同步更新。無 holds 時狀態為 `awaiting_decision`（待簽發），此時才允許人工簽發。
+
+**六條關鍵契約**：
+
+1. **通知由人簽發**：`assess()` 的 `notice` 恆為 `None`；CLI/Excel 寫的是 `review_draft()` 評審進度草稿，正式通知只在 `workspace.sign()` 時生成。
+2. **截止以收件時間為準**：用服務端 `received_at` 對比計劃截止日，不採信申請人自報的 `submitted_at`，逾期申請阻斷簽發。
+3. **評審人數下限**：`Program.min_reviewers`（YAML 可配，兩個內置計劃均為 2）；不足產生 `insufficient_reviews` hold，簽發被擋。
+4. **程序快照隨案**：個案保存 `program_snapshot`，`sign()` 時把簽發版本寫入 decision；配置更新或移除後，歷史個案的評審包仍按簽發時規則重建，避免「V1 清單配 V2 評估」。
+5. **版本號防衝突**：每次操作帶 `revision`，過期操作被拒絕；`amend()` 補件會清空舊評分與複議記錄，避免舊分數套新資料。
+6. **`auto` 恆本地**：`get_llm('auto')` 永遠用 MockLLM；外部模型須顯式指定 `--llm` 且環境有密鑰，Web 預設不出境。
+
+## 6. 擴展點
 
 - **新格式**：在 `ingest._EXT_MAP` + 新增解析函數即可。
 - **新計劃**：複製 `configs/program_demo.yaml` 改配置。
 - **新規則**：`check_completeness` 為純函數，便於單測與擴展。
+- **新地區**：在 `configs/regions/` 加入一份 yaml。
 - **MCP封裝**：各Agent均為無狀態純函數，可直接包為MCP工具供跨賽道複用。
