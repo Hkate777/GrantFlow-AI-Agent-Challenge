@@ -1,4 +1,4 @@
-"""Persistent intake, review, signing and post-award workflow."""
+"""持久化工作流：收件、評審、人工簽發與資助後追蹤。"""
 from __future__ import annotations
 
 import hashlib

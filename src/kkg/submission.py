@@ -1,4 +1,4 @@
-"""Read a submission from the portal, an exported message, or a legacy folder."""
+"""從入口表單、匯出的郵件或舊有資料夾讀取申請個案。"""
 from __future__ import annotations
 
 import hashlib
