@@ -25,9 +25,11 @@ BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE / "src"))
 
 from kkg.auth import AccountDisabled, AuthError, AuthStore, Forbidden, Identity
+from kkg.guard import review_output, scan_prompt_injection
 from kkg.llm import MockLLM, get_llm
 from kkg.models import Finding, FindingType, Milestone, ReviewScore, Severity
 from kkg.pipeline import Pipeline, load_applications
+from kkg.privacy import scan_sensitive
 from kkg.program import Program
 from kkg.region import Region
 from kkg import script as script_std
@@ -69,6 +71,11 @@ class DecisionInput(ResolutionInput):
 class ScriptAuditInput(Input):
     text: str = Field(max_length=200_000)
     region: str = Field(max_length=8)
+
+
+class SecurityScanInput(Input):
+    text: str = Field(max_length=200_000)
+    source: str = Field(default="", max_length=200)
 
 
 class LoginInput(Input):
@@ -366,6 +373,38 @@ def create_app(database: str | Path | None = None, configs: Path | None = None) 
         """列出可做字形標準化的地區及其目標字形標籤。"""
         return [{"code": code, "target": script_std.target_label(code)}
                 for code in script_std.supported_regions()]
+
+    @api.post("/api/security/scan")
+    def security_scan(payload: SecurityScanInput, identity: Identity = Depends(_require_identity)):
+        """提示注入偵測 + 輸出敏感值掃描：只回傳類型/位置/已去識別化摘錄。"""
+        signals = scan_prompt_injection(payload.text, locator=payload.source)
+        hits = scan_sensitive(payload.text)
+        return {
+            "signals": [s.__dict__ for s in signals],
+            "sensitive_hits": hits,
+            "safe": not signals and not hits,
+            "operator": identity.display_name,
+        }
+
+    @api.post("/api/security/review-output")
+    def security_review_output(payload: SecurityScanInput,
+                               identity: Identity = Depends(_require_identity)):
+        """模型輸出安全審查：偵測提示洩漏/執行痕跡/明文憑據，回傳審查結論。"""
+        verdict = review_output(payload.text)
+        return {"ok": verdict.ok, "reasons": verdict.reasons,
+                "summary": verdict.summary, "operator": identity.display_name}
+
+    @api.get("/api/security/vault/status")
+    def vault_status(identity: Identity = Depends(_require_identity)):
+        """密鑰環狀態：是否存在、已存憑據名稱與遮蔽值；絶不回傳明文。"""
+        from kkg.secrets import SecretVault, VaultError
+        try:
+            vault = SecretVault()
+            if not vault.exists():
+                return {"exists": False, "keys": [], "note": "尚未建立密鑰環"}
+            return {"exists": True, "keys": vault.listing()}
+        except VaultError as exc:
+            return {"exists": False, "keys": [], "note": str(exc)}
 
     @api.get("/api/run")
     def demo_run(region: str = "HK"):

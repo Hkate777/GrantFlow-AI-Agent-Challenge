@@ -7,12 +7,31 @@
 - 所有HTTP調用走標準庫urllib，無額外依賴
 
 支持的 --llm 取值見 get_llm()；any_openai兼容端點用 openai。
+
+憑據來源優先順序：進程環境變數 > 加密密鑰環（SecretVault）。
+密鑰環由「用戶安全精靈」在需要時解鎖並注入，明文不落盤、不進日誌。
 """
 from __future__ import annotations
 
 import json
 import os
 from typing import Any, Protocol
+
+
+def _key(env_name: str) -> str:
+    """讀取憑據：環境變數優先，其次加密密鑰環（仅在密钥环已可用时）。"""
+    value = os.environ.get(env_name, "")
+    if value:
+        return value
+    try:
+        from .secrets import SecretVault
+        vault = SecretVault()
+        if vault.exists():
+            return vault.get(env_name) or ""
+    except Exception:
+        # 未設定主口令或密鑰環不可用時靜默降級，不中斷流程、不洩漏原因
+        pass
+    return ""
 
 
 class LLM(Protocol):
@@ -75,7 +94,7 @@ class OpenAILLM(_HTTPLLM):
 
     def __init__(self) -> None:
         base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-        key = os.environ.get("OPENAI_API_KEY", "")
+        key = _key("OPENAI_API_KEY")
         model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
         if not key:
             raise RuntimeError("未設置OPENAI_API_KEY，無法使用OpenAI兼容模型。")
@@ -96,7 +115,7 @@ class AnthropicLLM(_HTTPLLM):
     """Anthropic Claude（Messages API）。"""
 
     def __init__(self) -> None:
-        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        key = _key("ANTHROPIC_API_KEY")
         model = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-haiku-latest")
         if not key:
             raise RuntimeError("未設置ANTHROPIC_API_KEY，無法使用Claude。")
@@ -118,7 +137,7 @@ class GeminiLLM(_HTTPLLM):
     """Google Gemini（generateContent API）。"""
 
     def __init__(self) -> None:
-        key = os.environ.get("GEMINI_API_KEY", "")
+        key = _key("GEMINI_API_KEY")
         model = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
         if not key:
             raise RuntimeError("未設置GEMINI_API_KEY，無法使用Gemini。")
@@ -152,7 +171,7 @@ def get_llm(kind: str = "auto") -> LLM:
     if kind not in factories:
         return MockLLM()
     env, factory = factories[kind]
-    if not os.environ.get(env):
+    if not _key(env):
         return MockLLM()
     try:
         return factory()

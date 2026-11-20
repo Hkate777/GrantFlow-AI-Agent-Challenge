@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .check import check_completeness, detect_duplicates
 from .extract import anomaly_scan, cross_verify, extract_fields
+from .guard import injection_findings, scan_prompt_injection
 from .ingest import ingest_dir
 from .llm import LLM, get_llm
 from .models import Application, AuditTrail, Finding, Milestone, ReviewScore
@@ -60,6 +61,20 @@ class Pipeline:
 
         findings = check_completeness(app, self.prog)
         findings += cross_verify(app, extracted)
+
+        # 安全掃描：對申請標題、字段與附件正文做提示注入偵測。
+        # 哨測到的可疑內容只標記為需人工覆核的 Finding，絶不執行其內容。
+        security_signals: list = []
+        blob = "\n".join([app.title, app.applicant,
+                          *(str(v) for v in app.fields.values()),
+                          *(d.text for d in app.docs if d.text)])
+        if blob.strip():
+            security_signals = scan_prompt_injection(blob, locator=app.app_id)
+            findings += injection_findings(security_signals, app_id=app.app_id)
+            if security_signals:
+                self.audit.log("guard", "injection_detected",
+                               f"{app.app_id} · {len(security_signals)}處 · "
+                               f"{[s.category for s in security_signals]}")
         if self.region:
             from .check import check_region, normalize_for_region
             from . import script as script_std

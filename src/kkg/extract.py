@@ -7,6 +7,7 @@ from collections import defaultdict
 from itertools import combinations
 from typing import Any
 
+from . import guard as guard_std
 from .evidence import FIELD_LABELS, Evidence, document_evidence, source_spans
 from .llm import LLM, MockLLM
 from .models import Application, Document, Finding, FindingType, Severity
@@ -47,10 +48,17 @@ def _model_evidence(docs: list[Document], llm: LLM) -> tuple[list[tuple[str, Evi
     corpus, passages = _model_input(docs)
     if not passages:
         return [], False
+    # 安全護欄：system 附加最高優先的隔離宣告；不可信申請內容明確包裹，
+    # 降低「忽略上述指令」式提示注入劫持抽取結果的風險。
+    system_prompt = guard_std.harden_prompt(_MODEL_PROMPT)
     try:
-        response = llm.complete(_MODEL_PROMPT, corpus).strip()
+        response = llm.complete(system_prompt, guard_std.wrap_untrusted(corpus)).strip()
         if response.startswith("```") and response.endswith("```"):
             response = response.partition("\n")[2][:-3].strip()
+        # 出口審查：模型輸出若洩漏系統提示/含執行痕跡/憑據，整批不採用
+        verdict = guard_std.review_output(response, expected_keys=set(_MODEL_FIELDS))
+        if not verdict.ok:
+            return [], True
         payload = json.loads(response)
     except Exception:
         return [], True

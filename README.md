@@ -53,6 +53,39 @@ GrantFlow面向大學、科技園、創投機構及創新創業支援單位，�
 書面應用：命令行 `--region` 指定地區時，intake 階段自動做字形審計並寫入審計日誌；Web 工作台提供 `POST /api/script/audit`（提交文字與地區，回傳逐處修正建議）與 `GET /api/script/regions`。測試見 `tests/test_script.py`。
 
 
+## 安全與私隱防護（不被惡意引導 · 私隱不外洩）
+
+申請附件與表單屬**不可信輸入**。Agent 建立三道可審計的閘門，確保智能體只做正常合理的文件處理，不會被惡意引導生成偏離任務的產物：
+
+| 閘門 | 模組 | 能力 |
+|---|---|---|
+| 入口偵測 | `guard.py` | 偵測指令覆蓋、角色劫持、系統提示提取、資料外洩、分隔符注入、工具越權、編碼繞過、隱藏字符；只標記為需人工覆核的 Finding，絶不執行其內容 |
+| 隔離包裝 | `guard.py` | `harden_prompt()` 在 system 附加最高優先隔離宣告；`wrap_untrusted()` 以明確分隔符包裹申請內容，防止閉合注入 |
+| 出口審查 | `guard.py` | `review_output()` 檢查模型輸出有否洩漏系統提示、含命令痕跡、可疑外傳連結、明文憑據或非預期欄位；可疑輸出整批不採用 |
+
+私隱加固（`privacy.py`）：
+
+- **去識別化**：送模型前遮蔽電郵、電話、香港身份證、內地身份證/手機號、護照、銀行卡、IP、合約編號及 API 憑據（`sk-`/`AIza`/`AWS`/JWT/GitHub token），原始值不落盤、不進日誌；
+- **防跨請求關聯**：每個 `Redactor` 實例使用隨機 salt，同一敏感值在不同請求產生不同佔位符，避免被關聯還原；
+- **輸出閘門**：`scan_output_leaks()` / `ensure_safe_output()` 在對外發布前最後把關，即使上游拼接出幻覺敏感值也不外洩。
+
+加密密鑰環（`secrets.py` + `scripts/vault_cli.py`）：取代明文環境變數存放模型 API 憑據。
+
+- scrypt 由主口令派生金鑰，HMAC-SHA256 串流加密 + encrypt-then-MAC 認證，篡改即拒絶讀取；
+- 檔案權限 0600，清單只顯示遮蔽值（前 4 後 2），絶不回傳明文；
+- 主口令由環境變數 `GRANTFLOW_VAULT_PASS` 提供，不明文寫入任何檔案；
+- 正式部署應改用硬件密鑰或雲端 KMS，此處為機構內部單機演示級。
+
+```bash
+export GRANTFLOW_VAULT_PASS='你的主口令'
+python scripts/vault_cli.py set OPENAI_API_KEY sk-...     # 加密存放
+python scripts/vault_cli.py list                           # 只顯示遮蔽值
+python scripts/vault_cli.py verify                         # 驗證口令與完整性
+```
+
+Web 工作台提供 `POST /api/security/scan`（注入+敏感值偵測）、`POST /api/security/review-output`（輸出審查）、`GET /api/security/vault/status`（密鑰環狀態，僅遮蔽值），均受認證保護。測試見 `tests/test_security.py`（19 項）。
+
+
 ## 快速開始
 
 ```bash
@@ -158,7 +191,10 @@ flowchart LR
 │   ├── auth.py                 # 本機帳號 / HTTP Basic / scrypt 口令 / 停用即撤銷
 │   ├── pipeline.py             # Agentic Workflow 編排 + 審計
 │   ├── llm.py                  # 可插拔模型（Mock/OpenAI/Claude/Gemini，優雅降級）
-│   ├── privacy.py              # 私隱與商業敏感資訊去識別化 + 審計
+│   ├── privacy.py              # 私隱去識別化 + 輸出閘門 + 隨機 salt 防關聯
+│   ├── guard.py                # 安全護欄：提示注入偵測 + 隔離包裝 + 輸出審查
+│   ├── secrets.py              # 加密密鑰環：scrypt + HMAC 認證加密，明文不落盤
+│   ├── script.py               # 地區字形標準化引擎（逐處定位 + 白名單）
 │   ├── program.py              # 計劃規則模型（含快照重建）
 │   ├── models.py               # 數據模型 + 審計日誌
 │   ├── region.py               # 地區模型 + 字形檢測
@@ -170,8 +206,9 @@ flowchart LR
 │   ├── check_language.py       # 語言規範檢查（預設警告，--strict 嚴格）
 │   ├── benchmark.py            # 量化基準測試：計劃書「可量化成效」
 │   ├── export_summary.py       # 匯出評審總覽 Excel
+│   ├── vault_cli.py            # 加密密鑰環管理（set/get/list/delete/verify）
 │   └── pitch_demo.py           # 一鍵生成決賽演示全套物料：output/pitch/
-├── tests/                      # 108 項端到端測試
+├── tests/                      # 127 項端到端測試（含 19 項安全測試）
 ├── TEAM_HANDOFF.md             # 團隊交接説明（現況/歷史線/設計決策/分工）
 └── docs/                       # 架構説明 / 計劃書大綱 / 版本説明 / 評審映射
 ```
@@ -202,6 +239,8 @@ python scripts/pitch_demo.py    # 一鍵生成全套決賽物料（含 8 分鐘�
 - 地區合規檢查為建議性提示，不自動判定資格，最終由人工確認適用性
 - MockLLM保證無外部調用時結果確定一致；真實模型 temperature 固定0.2
 - 接入真實模型時數據已先脫敏，降低敏感資訊外洩至第三方的風險
+- **不被惡意引導**：申請內容視為不可信輸入，提示注入只標記不執行；模型輸出經安全審查才採用，可疑即轉人工覆核
+- **憑據不落盤**：模型 API Key 存放於加密密鑰環（scrypt + HMAC 認證），明文不進檔案、日誌或清單
 
 ## 路線圖
 

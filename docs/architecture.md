@@ -51,7 +51,10 @@
 | `submission.py` | 安全收件 | 表單 JSON 校驗、附件數量/大小上限、`.eml` 解析、SHA-256 指紋冪等 |
 | `auth.py` | 帳號與身份 | scrypt 加鹽口令、HTTP Basic、工作階段 TTL、停用即撤銷全部工作階段 |
 | `llm.py` | LLM 抽象 | Protocol 接口；Mock/OpenAI 兼容/Anthropic/Gemini；`auto` 恆本地 |
-| `privacy.py` | 私隱去識別化 | 送模型前遮蔽 PII，內存映射不落盤，輸出前還原 |
+| `privacy.py` | 私隱去識別化 | 送模型前遮蔽 PII，隨機 salt 防跨請求關聯，輸出閘門 `ensure_safe_output` |
+| `guard.py` | 安全護欄 | 提示注入偵測（只標記不執行）、隔離包裝 `wrap_untrusted`/`harden_prompt`、輸出審查 `review_output` |
+| `secrets.py` | 加密密鑰環 | scrypt 派生 + HMAC 串流加密 + encrypt-then-MAC；明文不落盤、清單僅遮蔽值 |
+| `script.py` | 字形標準化 | OpenCC 逐處定位、香港標準字白名單、冪等轉換 |
 | `program.py` | 計劃規則模型 | YAML 載入；`from_snapshot` 從個案快照重建規則 |
 | `region.py` | 地區模型 | 字形檢測；15 地區配置載入 |
 | `export.py` | Excel 匯出 | 三個工作表（總覽/發現明細/評分明細），敏感欄位脫敏 |
@@ -86,6 +89,8 @@ submit（表單/.eml/資料夾）→ 建立個案（含計劃快照 + 服務端�
 ```
 
 每次操作都做版本號檢查（`revision`），過期操作被拒絕；`_evaluate` 對已簽發個案直接回傳簽發時的 assessment 與 findings，保證歷史結果不隨規則更新而漂移。
+
+**安全閘門（貫穿兩個入口）**：申請內容一律視為不可信輸入。`intake` 先以 `guard.scan_prompt_injection` 偵測注入（命中轉 `FindingType.SECURITY`，`needs_human=True`，只記類型與已去識別化摘錄，絶不執行內容）；送模型前 `privacy.Redactor` 去識別化、`guard.wrap_untrusted` 隔離包裹、`harden_prompt` 附加最高優先隔離宣告；模型輸出經 `guard.review_output` 審查，可疑即整批不採用。對外發布前再用 `ensure_safe_output` 把關。API 憑據由 `secrets.SecretVault` 加密存放，`llm._key()` 優先環境變數、其次密鑰環，明文不進日誌。
 
 ## 4. 多地區審查
 

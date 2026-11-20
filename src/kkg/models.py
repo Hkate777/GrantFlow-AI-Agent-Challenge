@@ -41,6 +41,7 @@ class FindingType(str, Enum):
     CONFLICT = "conflict"        # 潛在利益衝突
     ANOMALY = "anomaly"          # 數值/內容異常
     INCONSISTENT = "inconsistent"  # 跨源數據矛盾
+    SECURITY = "security"        # 安全/提示注入風險（需人工覆核）
 
 
 @dataclass

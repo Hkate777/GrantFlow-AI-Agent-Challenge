@@ -7,12 +7,20 @@
 - 提供 PrivacyReport 供申請人查看「發現並遮蔽了多少敏感值」
 
 支援的敏感類型：電郵、電話、香港身份證/護照/內地身份證號、銀行卡號、
-IP地址、合約編號，以及可選的商業敏感（金額、公司名）。
+IP地址、合約編號、內地手機號、API 憑據（sk-/AIza/AWS/JWT），以及
+可選的商業敏感（金額、公司名）。
+
+安全加固：
+- 預設 salt 改為每個 Redactor 實例隨機生成，避免同一敏感值在不同請求
+  產生相同佔位符而被跨請求關聯；需要穩定輸出時可顯式傳入 salt。
+- 新增 scan_output_leaks()：對外輸出前的最後一道閘門，確保敏感值或
+  憑據沒有因模型幻覺/拼接而重新出現在待發布文字中。
 """
 from __future__ import annotations
 
 import hashlib
 import re
+import secrets
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -43,14 +51,22 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("phone", re.compile(r"(?<!\d)(?:\+?852[- ]?)?\d{4}[- ]?\d{4}(?!\d)")),
     ("ip", re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")),
     ("contract", re.compile(r"\b(?:CT|PO|INV)[-]?\d{4,}\b", re.I)),  # 合約/訂單號
+    # 內地手機號：1 開頭 11 位，前置不可為數字
+    ("cnphone", re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")),
+    # API 憑據：OpenAI sk- / Google AIza / AWS AKIA / JWT / GitHub token
+    ("apikey", re.compile(r"(?:sk-[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z_-]{20,}|"
+                          r"AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|"
+                          r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})")),
 ]
 
 
 class Redactor:
     """去識別化器：以HMAC式哈希生成穩定佔位符，映射只存於記憶體。"""
 
-    def __init__(self, salt: str = "kkg-local-session", mask_amounts: bool = False) -> None:
-        self.salt = salt
+    def __init__(self, salt: str | None = None, mask_amounts: bool = False) -> None:
+        # 預設隨機 salt：同一敏感值在不同請求不會產生相同佔位符，
+        # 防止跨請求關聯；如需穩定輸出（例如測試）可顯式傳入 salt。
+        self.salt = salt or secrets.token_hex(16)
         self.mask_amounts = mask_amounts
         self._map: dict[str, str] = {}     # 原始值 -> 佔位符（記憶體內，不落盤）
         self.report = PrivacyReport()
@@ -119,3 +135,24 @@ def redact_for_llm(app_fields: dict[str, Any], corpus: str,
     merged = "\n".join(f"{k}: {v}" for k, v in app_fields.items()) + "\n" + corpus
     safe = redactor.redact(merged)
     return safe, redactor.report
+
+
+def scan_output_leaks(text: str) -> dict[str, int]:
+    """對外發布前的最後閘門：只回傳命中的類型與次數，絶不回傳原始值。
+
+    與 scan_sensitive 共用正則；獨立命名是為了讓呼叫端語意清晰——
+    在寫出評審包/Excel/通知前呼叫，若非空即應先去識別化。
+    """
+    return scan_sensitive(text or "")
+
+
+def ensure_safe_output(text: str, redactor: Redactor | None = None) -> tuple[str, dict[str, int]]:
+    """確保對外文字安全：發現敏感值即以佔位符取代，回傳 (安全文字, 命中統計)。
+
+    这是「輸出閘門」的便捷实现：即使上游拼接到幻覺敏感值，也不會外洩。
+    """
+    hits = scan_output_leaks(text)
+    if not hits:
+        return text, {}
+    redactor = redactor or Redactor()
+    return redactor.redact(text), hits
