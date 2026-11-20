@@ -1,14 +1,15 @@
-fastapi>=0.110
-uvicorn>=0.29
-pyyaml>=6.0
-# Web 測試與表單上傳所需（FastAPI TestClient / multipart 表單解析）
-httpx>=0.27
-python-multipart>=0.0.9
-# 以下為可選解析依賴（不安裝也能跑 demo，相應格式降級處理）：
-pypdf>=4.0          # PDF解析
-python-docx>=1.1    # DOCX解析
-python-pptx>=0.6.23 # PPTX解析
-openpyxl>=3.1       # XLSX解析
-Pillow>=10.0        # 圖片元數據
-pytest>=8.0         # 測試
-opencc-python-reimplemented>=0.1.7  # 語言規範檢查（繁體）
+# 鎖定實測相容版本（審評 P0-01：避免最低版本範圍漂移）。
+fastapi>=0.110,<1.0
+uvicorn>=0.29,<1.0
+pyyaml>=6.0,<7.0
+httpx>=0.27,<1.0              # FastAPI TestClient
+httpx2>=2.0,<3.0              # Starlette 1.7 TestClient 傳輸層
+python-multipart>=0.0.9,<0.1  # Web 表單上傳
+# 可選解析依賴（不安裝也能跑 demo，相應格式降級處理）：
+pypdf>=4.0,<6.0               # PDF解析
+python-docx>=1.1,<2.0         # DOCX解析
+python-pptx>=0.6.23,<2.0      # PPTX解析
+openpyxl>=3.1,<4.0            # XLSX解析與評審彙總Excel
+Pillow>=10.0,<13.0            # 圖片元數據
+pytest>=8.0,<10.0             # 測試
+opencc-python-reimplemented>=0.1.7,<0.2  # 語言規範檢查（繁體）

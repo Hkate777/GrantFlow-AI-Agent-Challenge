@@ -99,13 +99,15 @@ def test_audit_events_bind_server_identity_not_client_actor(tmp_path):
     criteria = {item["name"]: item["max_score"] for item in
                 next(program["criteria"] for program in client.get("/api/programs").json()
                      if program["program_id"] == case["program_id"])}
+    from conftest import ROLE_AUTH
     scored = client.put(f"/api/cases/{case['id']}/scores", json={
         "revision": case["revision"],
         "scores": [{"reviewer": "Reviewer A", "criteria": criteria, "comment": "ok."}],
         "actor": "前端偽造身份",   # P0-06：此值必須被忽略
-    }).json()
+    }, headers=ROLE_AUTH["reviewer"]).json()
     # 事件的操作者是服務端身份（demo 賬號的顯示名），而非請求體自填值。
-    assert scored["audit"][-1]["actor"] == "本機演示員"
+    # P0-07：評分事件綁定 reviewer 服務端身份（評分=評審職責）。
+    assert scored["audit"][-1]["actor"] == "評審員（演示）"
     assert scored["audit"][-1]["actor"] != "前端偽造身份"
     # me 端點確認服務端身份。
     assert client.get("/api/auth/me").json()["account_id"] == "demo"

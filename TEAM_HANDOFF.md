@@ -20,8 +20,8 @@ GrantFlow 對應「智賦香江」場景 ⑯「申請評審與項目管理流程
 | 語言檢查 | 通過（OpenCC `s2hk` 警告模式；`data/demo` 舊簡體輸入已豁免） |
 | Web 冒煙 | `/`、`app.js`、`styles.css`、`/api/program`、`/api/regions`、`/api/cases` 全 200 |
 | 兩線整合 | **已完成**：Web 工作台線 + 多地區/隱私/導出線合併（見 §2） |
-| 乾淨安裝 | 隔離 venv 只裝 `requirements.txt` → **96/96**（已鎖定依賴版本，CI 恢復綠燈） |
-| 身份認證 | **P0-06 已落地**：所有 /api 需 HTTP Basic（初始 admin 口令見啟動日誌，演示賬號 demo/demo）；審計事件綁服務端身份，前端自填 actor 已忽略；停用即時生效（`GET /api/auth/me` 驗證） |
+| 乾淨安裝 | 隔離 venv 只裝 `requirements.txt` → **106/106**（依賴已鎖定相容區間並補 `httpx`/`httpx2`/`python-multipart`，CI 恢復綠燈） |
+| 身份與角色 | **P0-06/07 已落地**：所有 /api 需 HTTP Basic（初始 admin 口令見啟動日誌；演示賬號 demo/demo、reviewer_demo、approver_demo、finance_demo）；審計事件綁服務端身份，前端自填 actor 已忽略；停用即時生效；**角色矩陣**：收件/補件/複議=operator、評分=reviewer、簽發=approver、台帳=finance、賬戶管理=admin（`tests/test_roles.py` 為正負用例） |
 | 實測缺陷 | **4 個已修**（截止時間/評委人數/歷史包導出/列表分頁，見 §4） |
 | 合併狀態 | **整合分支已併回 `main`**（`codex/web-workbench-merge` 與 `main` 同指向 `9f6de78`）；`v1.0.0` tag 指向合併前的 `b88a8d34`，建議打 `v1.1.0` |
 | 人工驗收 | 完整瀏覽器流程、真實 OCR、機構資料、人工工時基線仍待驗收 |

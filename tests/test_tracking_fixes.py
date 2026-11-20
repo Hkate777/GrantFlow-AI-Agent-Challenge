@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app
+from conftest import ROLE_AUTH
 
 
 def _client(path):
@@ -42,10 +43,10 @@ def _approved_case(client, tmp_path: Path, app_id="TRACK-1"):
     client.put(f"/api/cases/{case['id']}/scores", json={
         "revision": case["revision"],
         "scores": [{"reviewer": f"Reviewer {letter}", "criteria": criteria, "comment": "ok."}
-                   for letter in ("A", "B")]})
+                   for letter in ("A", "B")]}, headers=ROLE_AUTH["reviewer"])
     sign = client.post(f"/api/cases/{case['id']}/decision", json={
         "revision": case["revision"] + 1, "actor": "主管", "reason": "覆核通過",
-        "outcome": "approved"})
+        "outcome": "approved"}, headers=ROLE_AUTH["approver"])
     assert sign.status_code == 200, sign.text
     return case, criteria
 
@@ -74,7 +75,8 @@ def test_future_payment_confirmation_is_rejected(tmp_path):
     revision = client.get(f"/api/cases/{case['id']}").json()["revision"]
     project = _project(revision, payments=[{"name": "首期", "due": "2027-01-20", "amount": 60000,
                                             "paid_amount": 60000, "paid_at": "2099-12-31"}])
-    response = client.put(f"/api/cases/{case['id']}/project", json=project)
+    response = client.put(f"/api/cases/{case['id']}/project", json=project,
+                          headers=ROLE_AUTH["finance"])
     assert response.status_code == 422
     assert "不可晚於今天" in response.text
 
@@ -85,7 +87,8 @@ def test_future_report_submission_is_rejected(tmp_path):
     revision = client.get(f"/api/cases/{case['id']}").json()["revision"]
     project = _project(revision, reports=[{"name": "季度報告", "due": "2027-03-31",
                                            "submitted_at": "2099-12-31"}])
-    response = client.put(f"/api/cases/{case['id']}/project", json=project)
+    response = client.put(f"/api/cases/{case['id']}/project", json=project,
+                          headers=ROLE_AUTH["finance"])
     assert response.status_code == 422
     assert "不可晚於今天" in response.text
 
@@ -99,7 +102,8 @@ def test_funding_over_approved_budget_is_rejected(tmp_path):
         {"name": "首期", "due": "2027-01-20", "amount": 100000, "paid_amount": 0, "paid_at": ""},
         {"name": "尾期", "due": "2027-06-20", "amount": 100000, "paid_amount": 0, "paid_at": ""},
     ])
-    response = client.put(f"/api/cases/{case['id']}/project", json=project)
+    response = client.put(f"/api/cases/{case['id']}/project", json=project,
+                          headers=ROLE_AUTH["finance"])
     assert response.status_code == 422
     assert "超出核准額度" in response.text
 
@@ -113,7 +117,8 @@ def test_roundtrip_preserves_confirmed_values(tmp_path):
     revision = client.get(f"/api/cases/{case['id']}").json()["revision"]
     project = _project(revision, payments=[{"name": "首期", "due": "2027-01-20", "amount": 60000,
                                             "paid_amount": 45000, "paid_at": yesterday}])
-    response = client.put(f"/api/cases/{case['id']}/project", json=project)
+    response = client.put(f"/api/cases/{case['id']}/project", json=project,
+                          headers=ROLE_AUTH["finance"])
     assert response.status_code == 200, response.text
 
     saved = client.get(f"/api/cases/{case['id']}").json()["project"]
@@ -126,7 +131,8 @@ def test_roundtrip_preserves_confirmed_values(tmp_path):
     revision = client.get(f"/api/cases/{case['id']}").json()["revision"]
     again = _project(revision, payments=[{"name": "首期", "due": "2027-01-20", "amount": 60000,
                                           "paid_amount": 45000, "paid_at": yesterday}])
-    assert client.put(f"/api/cases/{case['id']}/project", json=again).status_code == 200
+    assert client.put(f"/api/cases/{case['id']}/project", json=again,
+                      headers=ROLE_AUTH["finance"]).status_code == 200
     row_again = client.get(f"/api/cases/{case['id']}").json()["project"]["disbursements"][0]
     assert row_again["paid_amount"] == 45000 and row_again["paid_at"] == yesterday
 
@@ -139,7 +145,8 @@ def test_within_budget_schedule_is_accepted(tmp_path):
         {"name": "首期", "due": "2027-01-20", "amount": 60000, "paid_amount": 0, "paid_at": ""},
         {"name": "尾期", "due": "2027-06-20", "amount": 60000, "paid_amount": 0, "paid_at": ""},
     ])
-    response = client.put(f"/api/cases/{case['id']}/project", json=project)
+    response = client.put(f"/api/cases/{case['id']}/project", json=project,
+                          headers=ROLE_AUTH["finance"])
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["project"]["funding"]["scheduled"] == 120000

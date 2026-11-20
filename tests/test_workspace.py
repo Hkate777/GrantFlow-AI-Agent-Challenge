@@ -5,6 +5,7 @@ from email.message import EmailMessage
 from fastapi.testclient import TestClient
 
 import app
+from conftest import ROLE_AUTH
 
 
 def _client(path):
@@ -41,7 +42,7 @@ def _save_scores(client, case):
     return client.put(f"/api/cases/{case['id']}/scores", json={"revision": case["revision"], "scores": [
         {"reviewer": f"Reviewer {letter}", "criteria": {item["name"]: item["max_score"] for item in criteria},
          "comment": "Feasible."} for letter in ("A", "B")],
-    })
+    }, headers=ROLE_AUTH["reviewer"])
 
 
 def test_portal_replay_does_not_duplicate_or_replace_case(tmp_path):
@@ -82,7 +83,8 @@ def test_supplement_invalidates_scores_and_stale_finals_fail(tmp_path):
         scored = _save_scores(client, case).json()
         route = f"/api/cases/{case['id']}"
         early = client.post(route + "/decision", json={"revision": scored["revision"], "actor": "Officer",
-                                                     "reason": "Inspected", "outcome": "approved"})
+                                                     "reason": "Inspected", "outcome": "approved"},
+                            headers=ROLE_AUTH["approver"])
         assert early.status_code == 409
         added = client.put(route + "/materials", data={"revision": scored["revision"], "actor": "Officer",
                                                        "metadata": json.dumps(_metadata())}, files=_files()[-1:])
@@ -102,7 +104,8 @@ def test_manual_approval_and_project_survive_restart(tmp_path):
         assert scored["assessment"]["notice"] is None
         url = f"/api/cases/{case['id']}"
         signed = client.post(url + "/decision", json={"revision": scored["revision"], "outcome": "approved",
-                                                       "actor": "Officer", "reason": "Checked all source records"})
+                                                       "actor": "Officer", "reason": "Checked all source records"},
+                             headers=ROLE_AUTH["approver"])
         assert signed.status_code == 200, signed.text
         final = signed.json()
         assert final["assessment"]["status"] == "approved"
@@ -111,7 +114,8 @@ def test_manual_approval_and_project_survive_restart(tmp_path):
             "milestones": [{"name": "Review", "due": "2020-01-01", "status": "done"}],
             "disbursements": [{"name": "First grant", "due": "2020-01-01", "amount": 5000,
                                "paid_amount": 1500, "paid_at": "2020-02-01"}],
-            "periodic_reports": [{"name": "Monthly report", "due": "2020-03-01", "submitted_at": ""}]})
+            "periodic_reports": [{"name": "Monthly report", "due": "2020-03-01", "submitted_at": ""}]},
+            headers=ROLE_AUTH["finance"])
         assert update.status_code == 200, update.text
 
     with _client(database) as client:
@@ -119,8 +123,13 @@ def test_manual_approval_and_project_survive_restart(tmp_path):
         assert saved["project"]["funding"] == {"scheduled": 5000, "paid": 1500}
         assert any("Monthly report" in warning for warning in saved["project"]["alerts"])
         # P0-06：審計事件綁定服務端身份；前端自填的 actor 不再作為審計證據。
-        assert saved["audit"][-1]["actor"] == "本機演示員"
-        assert saved["audit"][-1]["actor"] != "Officer"
+        # P0-07：簽發事件綁定 approver 服務端身份；前端自填 Officer 被忽略。
+        # P0-07：簽發事件綁定 approver 服務端身份；前端自填 Officer 被忽略。
+        # audit[-1] 是最後的台帳更新（finance 角色）。
+        sign_event = next(event for event in saved["audit"] if event["action"] == "decision_signed")
+        assert sign_event["actor"] == "主管（演示）"
+        assert sign_event["actor"] != "Officer"
+        assert saved["audit"][-1]["actor"] == "財務（演示）"
         assert client.get(url + "/report").status_code == 200
 
 

@@ -192,6 +192,25 @@ def _require_identity(request: Request) -> Identity:
     return identity
 
 
+def _require_role(*roles: str):
+    """P0-07 角色守衛工廠：admin 可執行一切，其餘角色須在允許清單內。"""
+    def dependency(identity: Identity = Depends(_require_identity)) -> Identity:
+        if identity.role != "admin" and identity.role not in roles:
+            raise Forbidden("此操作需要角色：" + "、".join(roles) +
+                            f"（當前角色：{identity.role}）。")
+        return identity
+    return dependency
+
+
+# P0-07 角色矩陣（職責分離）：經辦=收件/補件/複議記錄；評委=評分；主管=簽發；財務=台帳。
+ROLE_SUBMIT = ("operator",)
+ROLE_MATERIALS = ("operator",)
+ROLE_SCORES = ("reviewer",)
+ROLE_RESOLVE = ("operator",)
+ROLE_SIGN = ("approver",)
+ROLE_PROJECT = ("finance",)
+
+
 def create_app(database: str | Path | None = None, configs: Path | None = None) -> FastAPI:
     database = database or os.environ.get("GRANTFLOW_DB") or BASE / "output/grantflow.sqlite3"
     auth_store = AuthStore(Path(database).parent / "auth.sqlite3")
@@ -258,17 +277,17 @@ def create_app(database: str | Path | None = None, configs: Path | None = None) 
         return workspace.get(case_id)[0]
 
     @api.post("/api/demo")
-    def seed():
+    def seed(identity: Identity = Depends(_require_role(*ROLE_SUBMIT))):
         return {"added": workspace.seed(load_applications(BASE / "data/demo/applications"), _demo_scores())}
 
     @api.post("/api/cases", status_code=201)
-    async def submit(request: Request, identity: Identity = Depends(_require_identity)):
+    async def submit(request: Request, identity: Identity = Depends(_require_role(*ROLE_SUBMIT))):
         metadata, files, _ = await _intake_form(request)
         return await run_in_threadpool(workspace.submit, metadata, files, "web",
                                        actor=identity.display_name)
 
     @api.post("/api/mail", status_code=201)
-    async def mail(request: Request, identity: Identity = Depends(_require_identity)):
+    async def mail(request: Request, identity: Identity = Depends(_require_role(*ROLE_SUBMIT))):
         async with request.form(max_files=1, max_fields=0) as form:
             upload = form.get("message")
             raw = await _uploaded_file(upload, MAX_UPLOAD_BYTES)
@@ -279,7 +298,8 @@ def create_app(database: str | Path | None = None, configs: Path | None = None) 
                                        actor=identity.display_name)
 
     @api.put("/api/cases/{case_id}/materials")
-    async def amend(case_id: str, request: Request, identity: Identity = Depends(_require_identity)):
+    async def amend(case_id: str, request: Request,
+                    identity: Identity = Depends(_require_role(*ROLE_MATERIALS))):
         metadata, files, options = await _intake_form(request)
         raw_revision = options["revision"]
         if not isinstance(raw_revision, str) or not raw_revision.isdecimal() or len(raw_revision) > 12:
@@ -288,20 +308,20 @@ def create_app(database: str | Path | None = None, configs: Path | None = None) 
                                        identity.display_name, metadata, files, options["removed"])
 
     @api.put("/api/cases/{case_id}/scores")
-    def score(case_id: str, data: ScoresInput, identity: Identity = Depends(_require_identity)):
+    def score(case_id: str, data: ScoresInput, identity: Identity = Depends(_require_role(*ROLE_SCORES))):
         return workspace.score(case_id, data.revision, [ReviewScore(**row.model_dump()) for row in data.scores],
                                identity.display_name)
 
     @api.post("/api/cases/{case_id}/resolution")
-    def resolve(case_id: str, data: ResolutionInput, identity: Identity = Depends(_require_identity)):
+    def resolve(case_id: str, data: ResolutionInput, identity: Identity = Depends(_require_role(*ROLE_RESOLVE))):
         return workspace.resolve(case_id, data.revision, identity.display_name, data.reason)
 
     @api.post("/api/cases/{case_id}/decision")
-    def sign(case_id: str, data: DecisionInput, identity: Identity = Depends(_require_identity)):
+    def sign(case_id: str, data: DecisionInput, identity: Identity = Depends(_require_role(*ROLE_SIGN))):
         return workspace.sign(case_id, data.revision, identity.display_name, data.reason, data.outcome)
 
     @api.put("/api/cases/{case_id}/project")
-    def project(case_id: str, data: ProjectInput, identity: Identity = Depends(_require_identity)):
+    def project(case_id: str, data: ProjectInput, identity: Identity = Depends(_require_role(*ROLE_PROJECT))):
         return workspace.track(case_id, data.revision, identity.display_name,
                                data.model_dump(exclude={"revision", "actor"}))
 

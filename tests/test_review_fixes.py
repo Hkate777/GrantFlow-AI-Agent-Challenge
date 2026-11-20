@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app
+from conftest import ROLE_AUTH
 from kkg.models import ReviewScore
 from kkg.program import Program
 from kkg.workspace import Workspace
@@ -105,18 +106,22 @@ def test_min_reviewers_blocks_signoff(tmp_path):
     criteria = _criteria(next(iter(app._programs(config_dir).values())))
 
     client.put(f"/api/cases/{case['id']}/scores", json={
-        "revision": case["revision"], "scores": _scores_from(criteria, count=1)})
+        "revision": case["revision"], "scores": _scores_from(criteria, count=1)},
+        headers=ROLE_AUTH["reviewer"])
     holds = client.get(f"/api/cases/{case['id']}").json()["assessment"]["holds"]
     assert "insufficient_reviews" in holds, holds
     sign = client.post(f"/api/cases/{case['id']}/decision", json={
-        "revision": case["revision"] + 1, "actor": "主管", "reason": "嘗試簽發", "outcome": "approved"})
+        "revision": case["revision"] + 1, "actor": "主管", "reason": "嘗試簽發", "outcome": "approved"},
+        headers=ROLE_AUTH["approver"])
     assert sign.status_code == 409
 
     # 補足第二位評審後可簽發（乾淨個案毋須複議記錄）。
     client.put(f"/api/cases/{case['id']}/scores", json={
-        "revision": case["revision"] + 1, "scores": _scores_from(criteria, count=2)})
+        "revision": case["revision"] + 1, "scores": _scores_from(criteria, count=2)},
+        headers=ROLE_AUTH["reviewer"])
     sign = client.post(f"/api/cases/{case['id']}/decision", json={
-        "revision": case["revision"] + 2, "actor": "主管", "reason": "兩位評審一致通過", "outcome": "approved"})
+        "revision": case["revision"] + 2, "actor": "主管", "reason": "兩位評審一致通過", "outcome": "approved"},
+        headers=ROLE_AUTH["approver"])
     assert sign.status_code == 200
 
 
@@ -140,9 +145,11 @@ def test_pack_export_survives_plan_removal(tmp_path):
     case = response.json()
     criteria = _criteria(next(iter(app._programs(config_dir).values())))
     client.put(f"/api/cases/{case['id']}/scores", json={
-        "revision": case["revision"], "scores": _scores_from(criteria, count=1)})
+        "revision": case["revision"], "scores": _scores_from(criteria, count=1)},
+        headers=ROLE_AUTH["reviewer"])
     sign = client.post(f"/api/cases/{case['id']}/decision", json={
-        "revision": case["revision"] + 1, "actor": "主管", "reason": "通過", "outcome": "approved"})
+        "revision": case["revision"] + 1, "actor": "主管", "reason": "通過", "outcome": "approved"},
+        headers=ROLE_AUTH["approver"])
     assert sign.status_code == 200
 
     # 移除計劃配置（快照仍在個案內），用僅含其他計劃的設定重啟。
@@ -250,14 +257,17 @@ def test_signed_pack_uses_sign_time_rule_version(tmp_path):
     detail = fresh.get(f"/api/cases/{case['id']}").json()
     fresh.put(f"/api/cases/{case['id']}/scores", json={
         "revision": detail["revision"],
-        "scores": [{"reviewer": "Reviewer A", "criteria": criteria, "comment": "ok."}]})
+        "scores": [{"reviewer": "Reviewer A", "criteria": criteria, "comment": "ok."}]},
+        headers=ROLE_AUTH["reviewer"])
     # 規則改版 → 強制人工覆核後方可簽發
     fresh.post(f"/api/cases/{case['id']}/resolution", json={
         "revision": fresh.get(f"/api/cases/{case['id']}").json()["revision"],
-        "actor": "主管", "reason": "規則改版覆核完成，按 V2 維度評分。"})
+        "actor": "主管", "reason": "規則改版覆核完成，按 V2 維度評分。"},
+        headers=ROLE_AUTH["operator"])
     sign = fresh.post(f"/api/cases/{case['id']}/decision", json={
         "revision": fresh.get(f"/api/cases/{case['id']}").json()["revision"],
-        "actor": "主管", "reason": "V2 通過", "outcome": "approved"})
+        "actor": "主管", "reason": "V2 通過", "outcome": "approved"},
+        headers=ROLE_AUTH["approver"])
     assert sign.status_code == 200, sign.text
     assert sign.json()["rule_version"].startswith(next(
         p["rule_version"][:4] for p in fresh.get("/api/programs").json()
