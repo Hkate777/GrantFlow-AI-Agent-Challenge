@@ -52,7 +52,12 @@
 | `auth.py` | 帳號與身份 | scrypt 加鹽口令、HTTP Basic、工作階段 TTL、停用即撤銷全部工作階段 |
 | `llm.py` | LLM 抽象 | Protocol 接口；Mock/OpenAI 兼容/Anthropic/Gemini；`auto` 恆本地 |
 | `privacy.py` | 私隱去識別化 | 送模型前遮蔽 PII，隨機 salt 防跨請求關聯，輸出閘門 `ensure_safe_output` |
-| `guard.py` | 安全護欄 | 提示注入偵測（只標記不執行）、隔離包裝 `wrap_untrusted`/`harden_prompt`、輸出審查 `review_output` |
+| `guard.py` | 安全護欄 | 提示注入偵測（只標記不執行）、隔離包裝 `wrap_untrusted`/`harden_prompt`、輸出審查 `review_output`、數字台賬 `build_ledger`/`check_ledger` 防幻覺 |
+| `explain.py` | 確定性依據卡 | 由 Finding 規則生成「原始出處／排序／理由」，零 LLM、零新數字；缺失值走 `imputed` 標記 |
+| `scoring.py` | 確定性評分 | 權重和 strict 必須 1.0／relative 雙模式；逐步貢獻可稽核；缺維度不補零 |
+| `eval_traces.py` | Trace 評測 | 引用完整性／來源多樣性／判定留痕三項零成本規則判據；可選 Judge 失敗不影響規則 |
+| `compliance.py` | 合規分級 | refuse/degrade/note 三級 + 法規依據 + 「未命中不代表合規」能力邊界聲明 |
+| `decision_journal.py` | 決策品質 | 結構化 LLM 判定、N 天回看對帳、按模型準確率（未覆核不進分母） |
 | `secrets.py` | 加密密鑰環 | scrypt 派生 + HMAC 串流加密 + encrypt-then-MAC；明文不落盤、清單僅遮蔽值 |
 | `script.py` | 字形標準化 | OpenCC 逐處定位、香港標準字白名單、冪等轉換 |
 | `program.py` | 計劃規則模型 | YAML 載入；`from_snapshot` 從個案快照重建規則 |
@@ -93,7 +98,9 @@ submit（表單/.eml/資料夾）→ 建立個案（含計劃快照 + 服務端�
 
 **安全閘門（貫穿兩個入口）**：申請內容一律視為不可信輸入。`intake` 在**任何模型呼叫之前**先以 `guard.scan_prompt_injection` 偵測注入（規則＋結構化啟發式；命中轉 `FindingType.SECURITY`，`needs_human=True`，只記類型與已去識別化摘錄，絶不執行內容；**只作提示，不保證攔截**）；送模型前 `privacy.Redactor` 去識別化、`guard.wrap_untrusted` 隔離包裹、`harden_prompt` 附加最高優先隔離宣告；模型輸出經 `guard.review_output` 審查，可疑即整批不採用。MockLLM 不發出模型請求，但掃描與對外閘門照樣執行。抽取結果不再 `restore()` 回明文，交叉驗證使用去識別化視圖。
 
-**對外物料出口**：`output_gate.py` 是 `ensure_safe_output()` 的實際呼叫點——Web 評審包、CLI 評審包、Excel 總表與結果通知必經該層，命中類型與次數寫入 `gate_report.json`。身份方面，Basic 已驗證憑據有短時内存快取（停用即清空）；遠端模式停用弱口令演示賬號，評分身份綁定登入帳號，利益衝突以 `subject_id`/`reviewer_id` 結構化比對（舊記錄回退至姓名正規化）。API 憑據由 `secrets.SecretVault` 加密存放，`llm._key()` 優先環境變數、其次密鑰環；明文不進日誌、不落盤，也**不再注入 `os.environ`**。
+**對外物料出口**：`output_gate.py` 是 `ensure_safe_output()` 的實際呼叫點——Web 評審包、CLI 評審包、Excel 總表與結果通知必經該層，命中類型與次數寫入 `gate_report.json`。結果通知另以 `build_ledger(app, assessment, budget_cap)` 建立可信數字台賬，`gate_text(ledger=...)` 檢查通知中台賬外的金額／分數並記入 `數字幻覺` 統計與審計事件。身份方面，Basic 已驗證憑據有短時内存快取（停用即清空）；遠端模式停用弱口令演示賬號，評分身份綁定登入帳號，利益衝突以 `subject_id`/`reviewer_id` 結構化比對（舊記錄回退至姓名正規化）。API 憑據由 `secrets.SecretVault` 加密存放，`llm._key()` 優先環境變數、其次密鑰環；明文不進日誌、不落盤，也**不再注入 `os.environ`**。
+
+**可追溯鏈（Finding → 依據卡 → 評測 → 決策品質）**：`Pipeline.traceability()` 把每條 Finding 轉為 `explain.EvidenceCard`（原始出處／排序／規則理由，零 LLM），`eval_traces.rule_checks()` 對卡片做引用完整性／來源多樣性／判定留痕三項零成本檢查（LLM-as-Judge 僅附加、失敗不影響規則），`compliance.classify()` 給出 refuse/degrade/note 三級合規分級（每條帶法規依據並附「未命中不代表合規」聲明），`scoring.deterministic_score()` 提供可稽核的確定性評分（缺維度不補零），`decision_journal` 持久化判定並支援 N 天回看與按模型準確率。CLI 在 `[7/7]` 把全部物料寫入 `output/traceability/`；全部為規則式、可重現，是「可驗證／可解釋」的落實而非文件口號。
 
 ## 4. 多地區審查
 

@@ -127,7 +127,45 @@ class Pipeline:
                        f"{app.app_id} · {agg['status']} · total={agg['weighted_total']}")
         return agg
 
-    # ---------- 階段 5：項目追蹤 ----------
+    # ---------- 階段 5：可追溯物料與質量閉環 ----------
+    def traceability(self, app: Application, findings: list[Finding],
+                     scores: list[ReviewScore] | None = None) -> dict:
+        """為單一申請生成可追溯物料：依據卡、合規分級、確定性評分與評測。
+
+        全部為規則式、零 LLM、零新數字；决策日志由呼叫端持久化（Web 用
+        DecisionJournal，CLI 寫入 SQLite）。回傳 dict 便於序列化與展示。
+        """
+        from .compliance import classify
+        from .eval_traces import evaluate_trace
+        from .explain import evidence_bundle
+        from .scoring import deterministic_score
+
+        cards = evidence_bundle(findings)
+        # 依據卡自帶 original source；用卡片來源集合做引用完整性檢查。
+        known_sources = {
+            item.source for card in cards for item in card.basis if item.source
+        } | {"規則引擎"}
+        verdicts = [
+            evaluate_trace(f"{app.app_id}-T{index}", card, known_sources=known_sources).as_dict()
+            for index, card in enumerate(cards, 1)
+        ]
+        compliance = classify(app, self.prog)
+        # 確定性評分取首份有效評分作示範（與 review.aggregate 的多人加權互補）。
+        sample = scores[0].criteria if scores else {}
+        deterministic = deterministic_score(sample, self.prog)
+        result = {
+            "app_id": app.app_id,
+            "cards": [card.as_dict() for card in cards],
+            "verdicts": verdicts,
+            "compliance": compliance.as_dict(),
+            "deterministic_score": deterministic.as_dict(),
+        }
+        self.audit.log("traceability", "built",
+                       f"{app.app_id} · cards={len(cards)} · "
+                       f"compliance_hits={len(compliance.hits)}")
+        return result
+
+    # ---------- 階段 6：項目追蹤 ----------
     def track(self, app: Application, milestones: list[Milestone],
               periodic_reports: list[str] | None = None) -> str:
         # 以地區當地今天判斷到期/確認日期，避免沿用伺服器本地時間出錯。

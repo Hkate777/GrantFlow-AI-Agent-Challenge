@@ -309,7 +309,16 @@ class Workspace:
                 raise WorkspaceConflict("個案仍有待處理事項，或分數未達通過門檻。")
             app = _application(case)
             program = self.program(app.program)
-            notice, _ = gate_text(result_notice(app.app_id, app.title, assessment, outcome == "approved"))
+            # 數字台賬：原始申請 + 規則計算出的 assessment（總分/人數/閾值均為可信數字）。
+            # 通知中若有台賬外的金額/分數，即視為幻覺並記入閘門統計，交人工覆核。
+            from .guard import build_ledger
+            notice_ledger = build_ledger(app, assessment, program.budget_cap)
+            notice, notice_hits = gate_text(
+                result_notice(app.app_id, app.title, assessment, outcome == "approved"),
+                ledger=notice_ledger)
+            if "數字幻覺" in notice_hits:
+                _event(case, "output_gate", actor,
+                       f"結果通知含台賬外數字 {notice_hits['數字幻覺']} 處，需人工覆核")
             assessment.update(status=outcome, holds=[], approval_allowed=False, decline_allowed=False,
                               notice=notice)
             assessment["todos"] = followup_todos(app.app_id, assessment)

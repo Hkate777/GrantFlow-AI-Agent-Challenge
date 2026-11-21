@@ -27,6 +27,11 @@ from kkg.pipeline import Pipeline, load_applications  # noqa: E402
 from kkg.program import Program                    # noqa: E402
 from kkg.region import Region                      # noqa: E402
 from kkg.review import review_draft                # noqa: E402
+from kkg.compliance import classify                 # noqa: E402
+from kkg.decision_journal import DecisionJournal    # noqa: E402
+from kkg.eval_traces import evaluate_batch          # noqa: E402
+from kkg.explain import cards_markdown, evidence_bundle  # noqa: E402
+from kkg.scoring import score_markdown              # noqa: E402
 
 
 def _load_reviews(root: str | Path) -> dict[str, list[ReviewScore]]:
@@ -88,12 +93,12 @@ def main() -> None:
     pipe = Pipeline(prog, llm=llm, pass_threshold=args.pass_threshold, region=region)
     out = _run_output(Path(args.out))
 
-    print(f"[1/6] 加載計劃配置：{prog.name}  |  地區：{region.name}  |  LLM：{llm.name}")
+    print(f"[1/7] 加載計劃配置：{prog.name}  |  地區：{region.name}  |  LLM：{llm.name}")
     load_errors: list[str] = []
     apps = load_applications(args.apps, errors=load_errors)
     for err in load_errors:
         print(f"      [注意] 跳過無效申請：{err}")
-    print(f"[2/6] 受理申請{len(apps)}份，解析附件 …")
+    print(f"[2/7] 受理申請{len(apps)}份，解析附件 …")
 
     extracts, findings = {}, {}
     for a in apps:
@@ -106,19 +111,19 @@ def main() -> None:
     batch_fd = pipe.batch_checks(apps)
     batch_map = _findings_by_app(batch_fd)
     if batch_fd:
-        print("[3/6] 批次檢查：")
+        print("[3/7] 批次檢查：")
         for f in batch_fd:
             print(f"      [注意] {f.message}")
     else:
-        print("[3/6] 批次檢查：無重複/離羣申請")
+        print("[3/7] 批次檢查：無重複/離羣申請")
 
     packs = pipe.build_packs(apps, extracts, findings, out / "reviewer_packs")
-    print(f"[4/6] 已生成評審資料包{len(packs)}套 至{out / 'reviewer_packs'}")
+    print(f"[4/7] 已生成評審資料包{len(packs)}套 至{out / 'reviewer_packs'}")
 
     reviews = _load_reviews(args.reviews)
     review_dir = out / "review"
     review_dir.mkdir(exist_ok=True)
-    print("[5/6] 評審彙總：")
+    print("[5/7] 評審彙總：")
     for a in apps:
         # 評估併入批次發現（Finding 物件），草稿狀態與工作台一致。
         case_findings = findings[a.app_id] + [
@@ -155,16 +160,62 @@ def main() -> None:
         Milestone("中期成果", "2027-02-01", "pending", 80000),
         Milestone("結題驗收", "2027-06-30", "pending", 120000),
     ]
-    print("[6/6] 項目追蹤與管理報告：")
+    print("[6/7] 項目追蹤與管理報告：")
     for a in apps[:1]:  # demo：對首份申請生成管理報告
         report = pipe.track(a, [Milestone(**vars(m)) for m in demo_ms],
                             periodic_reports=["2026-11月度報告：已提交", "2026-12月度報告：未提交 [注意]"])
         (track_dir / f"{a.app_id}_management_report.md").write_text(report, encoding="utf-8")
         print(f"      已生成{a.app_id}管理報告")
 
+    # ---------- 追溯物料與質量閉環 ----------
+    trace_dir = out / "traceability"
+    trace_dir.mkdir(exist_ok=True)
+    journal = DecisionJournal(trace_dir / "decision_journal.sqlite3")
+    trace_cards: dict[str, object] = {}
+    print("[7/7] 可追溯物料與質量閉環：")
+    for a in apps:
+        case_findings = findings[a.app_id] + [
+            f for f in batch_fd if a.app_id in (getattr(f, "application_ids", []) or [])]
+        result = pipe.traceability(a, case_findings, reviews.get(a.app_id, []))
+        (trace_dir / f"{a.app_id}_trace.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        cards = evidence_bundle(case_findings)
+        (trace_dir / f"{a.app_id}_evidence.md").write_text(
+            cards_markdown(cards, title=f"判定依據卡 · {a.app_id}"), encoding="utf-8")
+        (trace_dir / f"{a.app_id}_compliance.md").write_text(
+            classify(a, prog).markdown(), encoding="utf-8")
+        from kkg.scoring import deterministic_score
+        sample = reviews.get(a.app_id, [])
+        score_result = deterministic_score(sample[0].criteria if sample else {}, prog)
+        (trace_dir / f"{a.app_id}_score.md").write_text(
+            score_markdown(score_result), encoding="utf-8")
+        if cards:
+            trace_cards[a.app_id] = cards[0]
+        # 記錄判定痕跡；模型識別取自實際 LLM，狀態詳見 review_dir。
+        journal.record(
+            a.app_id, "reviewed", model=llm.name,
+            rationale=f"見 {a.app_id}_review.json",
+            basis=[item.source for card in cards for item in card.basis if item.source][:5],
+            risks=[c.finding_type for c in cards if c.severity in ("critical", "error")][:5],
+        )
+        print(f"      {a.app_id}：依據卡{len(cards)}張、合規分級{len(result['compliance']['hits'])}條")
+
+    if trace_cards:
+        known = {item.source for card in trace_cards.values() for item in card.basis if item.source}
+        summary = evaluate_batch(trace_cards, known_sources=known)
+        (trace_dir / "eval_summary.json").write_text(
+            json.dumps(summary.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        (trace_dir / "eval_summary.md").write_text(
+            "# Trace 評測摘要\n\n"
+            f"- 規則判據通過：{summary.rule_passed}/{summary.total}\n"
+            "- 對外口徑：以規則判據為準；Judge 僅為附加訊號。\n", encoding="utf-8")
+    (trace_dir / "decision_quality.md").write_text(
+        journal.journal_markdown(), encoding="utf-8")
+
     (out / "audit_log.json").write_text(pipe.audit_json(), encoding="utf-8")
     print(f"\n[通過] 全流程完成。輸出目錄：{out.resolve()}")
     print(f"   審計日誌：{out / 'audit_log.json'}")
+    print(f"   追溯物料：{trace_dir}")
 
 
 if __name__ == "__main__":

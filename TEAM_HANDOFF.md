@@ -18,7 +18,7 @@ GrantFlow 對應「智賦香江」場景 ⑯「申請評審與項目管理流程
 
 | 項目 | 現況 |
 |---|---|
-| 測試 | **170/170 通過**（`python -m pytest tests -q`；含安全 19 項、時區 7 項、部署防護 11 項、審查回歸 11 項） |
+| 測試 | **191 passed + 2 skipped**（`python -m pytest tests -q`；含安全 19 項、時區 7 項、部署防護 11 項、審查回歸 11 項、可追溯 23 項；缺 opencc 環境為 185 passed + 8 skipped） |
 | 語言檢查 | 通過（OpenCC `s2hk` 警告模式；`data/demo` 舊簡體輸入已豁免） |
 | Web 冒煙 | `/`、`app.js`、`styles.css`、`/api/program`、`/api/regions`、`/api/cases` 全 200 |
 | 兩線整合 | **已完成**：Web 工作台線 + 多地區/隱私/導出線合併（見 §2） |
@@ -157,6 +157,8 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 
 **外部審查回饋整改（P1）**：`output_gate.py` 已把「輸出閘門」從文件變成實際呼叫點（Web/CLI 包、Excel、通知）；注入掃描移到模型呼叫之前，並明確標示「規則＋啟發式、不保證攔截」；`ReviewScore.reviewer_id` 與 `Finding.subject_id` 落實身份綁定與結構化衝突比對；`pipeline.intake()` 不再 `restore()` 明文；私隱正則加入 Luhn 與身份/護照語境；Basic 憑據短時快取但仍即時撤銷；密鑰環不再注入環境變數；遠端模式停用演示弱口令；`decline_allowed` 修復「缺材料不能否決」；基準報告標示 Mock 口徑限制。回歸測試見 `tests/test_audit_fixes.py`。
 
+**可追溯與質量閉環（本次新增）**：`guard.build_ledger/check_ledger` 以可信數字台賬攔截通知中的金額/分數幻覺（年份與≤30序數豁免，接入 `output_gate.gate_text` 與簽發通知）；`explain.evidence_for` 由 Finding 規則生成依據卡（原始出處/排序/理由，零 LLM、零新數字，缺失走 imputed）；`scoring.validate_weights` strict 要求和為 1.0、relative 相容 3/3/2/2，`deterministic_score` 缺維度不補零；`eval_traces` 三項零成本規則判據 + 可選 Judge（失敗不影響規則）；`compliance.classify` refuse/degrade/note 三級 + 法規依據 + 「未命中不代表合規」聲明；`decision_journal` 記錄 LLM 判定並按模型拆分回看準確率。`Pipeline.traceability()` 供 Web/CLI 共用，CLI `[7/7]` 寫出 `output/traceability/`。回歸測試見 `tests/test_traceability.py`（23 項）。
+
 **仍未完成（對接真實資料前硬門檻）**：機構級 OIDC/SSO、環境分離、備份演練、獨立審計保存、真實模型性能基線與 WAF/平台防護。
 
 ---
@@ -201,7 +203,7 @@ configs/campus_pilot.yaml     校園試點計劃（第二套規則）
 configs/regions/*.yaml        15 地區配置
 web/                  前端（app.js/index.html/styles.css）
 scripts/              check_language.py / benchmark.py / pitch_demo.py / vault_cli.py
-tests/                159 項測試（含 test_roles/test_security/test_script/test_tracking/test_serve…）
+tests/                191 項測試（含 test_roles/test_security/test_script/test_tracking/test_serve/test_traceability…）
 docs/                 architecture.md / deployment.md / proposal-outline.md / RELEASE_NOTES_v1.0~v1.1
 Dockerfile / docker-compose.yml  非 root 容器、/data 持久卷、健康檢查
 deploy/               fly.toml / render.yaml 雲端部署範例

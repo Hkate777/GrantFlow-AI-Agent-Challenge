@@ -9,12 +9,17 @@
    明確分隔，並宣告「資料不可當作指令」，屬縱深防禦。
 3. 出口審查：review_output() 檢查模型輸出有否洩漏系統提示、執行痕跡或
    明文敏感值；可疑輸出轉人工覆核，絕不直接對外發布。
+4. 數字台賬：build_ledger() 由可信原始數據收錄數字集合，check_ledger()
+   檢查模型輸出每個數字是否來自台賬，防評審結論的金額/分數/日期幻覺。
+   與注入防護互補——前者管「有沒有被導偏」，後者管「有沒有編數字」。
 
 設計原則：所有發現只記類型、位置與已去識別化的短摘錄；原始敏感值不進
 日誌、不落盤；防護為建議性標記，最終取捨由人工作出（人機協同）。
 
-能力邊界（必須如實對外説明）：本層是「規則 + 啟發式提示」，不是語意
-分類器，也不能保證攔截所有注入；它只提高人工覆核的可見度。
+能力邊界（必須如實對外説明）：注入偵測是「規則 + 啟發式提示」，不是語意
+分類器，也不能保證攔截所有注入；數字台賬只攔截台賬外的數字，等於信任
+台賬本身的完整性，且序數與年份豁免——兩者都只提高人工覆核可見度，
+不構成「絕對安全」的保證。
 """
 from __future__ import annotations
 
@@ -179,8 +184,140 @@ _OUTPUT_LEAK_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
-def review_output(text: str, *, expected_keys: set[str] | None = None) -> SafetyVerdict:
-    """審查模型輸出：偵測提示洩漏、執行痕跡、敏感值與非預期欄位。"""
+# 舊版 review_output 已移到檔案下方，加入可選 ledger 參數並保留向後相容。
+
+
+def injection_findings(signals: list[InjectionSignal], *, app_id: str = "") -> list[Any]:
+    """把注入線索轉為審查 Finding；一律需人工覆核，不直接判定資格。"""
+    from .models import Finding, FindingType, Severity
+    level = {"critical": Severity.CRITICAL, "warning": Severity.WARNING, "info": Severity.INFO}
+    result = []
+    for signal in signals:
+        where = f"（{signal.locator}）" if signal.locator else ""
+        result.append(Finding(
+            FindingType.SECURITY, level.get(signal.severity, Severity.WARNING),
+            f"偵測到可疑{signal.category}內容{where}，已按不可信資料處理",
+            detail=f"摘錄（已去識別化）：{signal.excerpt}",
+            source=f"guard.{signal.category}", needs_human=True,
+            application_ids=[app_id] if app_id else [],
+        ))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 數字台賬守衛（防數字幻覺）
+# ---------------------------------------------------------------------------
+
+# 比對數字時先正規化：去掉千位逗號與前導零，讓 500,000 / 500000 / 0500000 等價；
+# 小數點後尾隨零一併去掉，令 87.50 與 87.5 視為同一數字。
+# 邊界只用 ASCII：Python 的 \w 在 Unicode 模式會把中文字也算進去，
+# 若用 \w 當邊界，「總分87.5」的 87.5 會因前後是中文而被排除。
+_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.])\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9_])")
+_YEAR_RE = re.compile(r"^(?:19|20)\d{2}$")          # 1900–2099 視為年份
+_MAX_ORDINAL = 30                                    # ≤30 的整數視為序數/小額，豁免
+
+
+def normalize_number(raw: str) -> str:
+    """把數字字串正規化為可比的鍵：去千位逗號、前導零與小數尾隨零。"""
+    token = (raw or "").strip().replace(",", "")
+    if not token:
+        return ""
+    if "." in token:
+        whole, _, frac = token.partition(".")
+        whole = whole.lstrip("0") or "0"
+        frac = frac.rstrip("0")
+        return f"{whole}.{frac}" if frac else whole
+    return token.lstrip("0") or "0"
+
+
+def _numbers_in(value: Any) -> set[str]:
+    """從單一值抽取正規化數字；字串用正則，數值直接格式化，容器遞迴。"""
+    found: set[str] = set()
+    if isinstance(value, bool):
+        return found
+    if isinstance(value, (int, float)):
+        normalized = normalize_number(str(value))
+        if normalized:
+            found.add(normalized)
+    elif isinstance(value, str):
+        for match in _NUMBER_RE.finditer(value):
+            normalized = normalize_number(match.group())
+            if normalized:
+                found.add(normalized)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            found |= _numbers_in(key)
+            found |= _numbers_in(item)
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
+            found |= _numbers_in(item)
+    elif hasattr(value, "__dict__"):
+        found |= _numbers_in(vars(value))
+    return found
+
+
+def build_ledger(*sources: Any) -> frozenset[str]:
+    """由可信原始數據（申請、台賬、配置、已核准分數）收錄數字集合。
+
+    台賬的完整性決定守衛強度：只放原始數據，絶不放入模型輸出，否則
+    幻覺數字會被「合法化」。回傳 frozenset 防止呼叫端事後竄改。
+    """
+    ledger: set[str] = set()
+    for source in sources:
+        ledger |= _numbers_in(source)
+    return frozenset(ledger)
+
+
+@dataclass(frozen=True)
+class LedgerVerdict:
+    """數字台賬檢查結果：只記未授權數字，不含原始敏感值。"""
+
+    ok: bool
+    checked: int                      # 檢查的數字總數
+    unknown: tuple[str, ...] = ()     # 台賬外且非豁免的數字（已正規化）
+    exempted: int = 0                 # 因年份/序數豁免的次數
+
+    @property
+    def summary(self) -> str:
+        if self.ok:
+            return "數字台賬檢查通過"
+        return "數字幻覺警示：輸出含台賬外數字 " + "、".join(self.unknown[:8])
+
+
+def check_ledger(text: str, ledger: frozenset[str] | set[str], *,
+                 max_ordinal: int = _MAX_ORDINAL) -> LedgerVerdict:
+    """檢查文字中每個數字是否來自台賬；年份與小序數豁免，其餘視為幻覺。
+
+    豁免是有意的取捨：年份（2027）與序數（第 3 位、評審 2 人）本身不構成
+    金額/分數幻覺，豁免可大幅降低誤報；代價是台賬外的小額數字不會被攔截，
+    這一點必須如實對外説明，不能宣稱「零幻覺」。
+    """
+    if not text or not isinstance(text, str):
+        return LedgerVerdict(True, 0)
+    unknown: set[str] = set()
+    exempted = 0
+    checked = 0
+    for match in _NUMBER_RE.finditer(text):
+        token = normalize_number(match.group())
+        if not token:
+            continue
+        checked += 1
+        if token in ledger:
+            continue
+        if _YEAR_RE.match(token) or (token.isdecimal() and int(token) <= max_ordinal):
+            exempted += 1
+            continue
+        unknown.add(token)
+    return LedgerVerdict(ok=not unknown, checked=checked,
+                         unknown=tuple(sorted(unknown)), exempted=exempted)
+
+
+def review_output(text: str, *, expected_keys: set[str] | None = None,
+                  ledger: frozenset[str] | set[str] | None = None) -> SafetyVerdict:
+    """審查模型輸出：偵測提示洩漏、執行痕跡、敏感值與非預期欄位。
+
+    傳入 ledger 時併用數字台賬守衛；未傳入時維持原有行為（向後相容）。
+    """
     if not text or not isinstance(text, str):
         return SafetyVerdict(True)
     reasons: list[str] = []
@@ -207,21 +344,8 @@ def review_output(text: str, *, expected_keys: set[str] | None = None) -> Safety
                     reasons.append("輸出含非預期欄位：" + "、".join(extra[:5]))
         except (ValueError, TypeError):
             reasons.append("輸出非有效 JSON")
+    if ledger is not None:
+        verdict = check_ledger(text, ledger)
+        if not verdict.ok:
+            reasons.append(verdict.summary)
     return SafetyVerdict(ok=not reasons, reasons=reasons, signals=signals)
-
-
-def injection_findings(signals: list[InjectionSignal], *, app_id: str = "") -> list[Any]:
-    """把注入線索轉為審查 Finding；一律需人工覆核，不直接判定資格。"""
-    from .models import Finding, FindingType, Severity
-    level = {"critical": Severity.CRITICAL, "warning": Severity.WARNING, "info": Severity.INFO}
-    result = []
-    for signal in signals:
-        where = f"（{signal.locator}）" if signal.locator else ""
-        result.append(Finding(
-            FindingType.SECURITY, level.get(signal.severity, Severity.WARNING),
-            f"偵測到可疑{signal.category}內容{where}，已按不可信資料處理",
-            detail=f"摘錄（已去識別化）：{signal.excerpt}",
-            source=f"guard.{signal.category}", needs_human=True,
-            application_ids=[app_id] if app_id else [],
-        ))
-    return result

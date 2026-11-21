@@ -50,6 +50,7 @@ HK_SPELLING_ALLOWED: dict[str, str] = {
     "客戶端": "客户端",
     "離群值": "離羣值",
     "脫敏": "脱敏",
+    "守衛": "守衞",     # 香港用「衛」，OpenCC s2hk 誤轉為「衞」
 }
 
 ROOT = Path(__file__).resolve().parent.parent

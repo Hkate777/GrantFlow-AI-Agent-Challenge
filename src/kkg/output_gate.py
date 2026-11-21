@@ -38,9 +38,21 @@ def redact_findings(findings: list[Finding], redactor: Redactor) -> list[Finding
     ) for finding in findings]
 
 
-def gate_text(text: str, redactor: Redactor | None = None) -> tuple[str, dict[str, int]]:
-    """文字輸出閘門：回傳 (安全文字, 命中統計)。"""
-    return ensure_safe_output(text or "", redactor or Redactor())
+def gate_text(text: str, redactor: Redactor | None = None,
+              ledger: frozenset[str] | set[str] | None = None
+              ) -> tuple[str, dict[str, int]]:
+    """文字輸出閘門：回傳 (安全文字, 命中統計)。
+
+    傳入 ledger 時併用數字台賬守衛：台賬外的金額/分數/日期視為幻覺並記入
+    統計 ``數字幻覺``；閘門只統計與標記，不竄改原文，由人工覆核取捨。
+    """
+    safe, hits = ensure_safe_output(text or "", redactor or Redactor())
+    if ledger is not None:
+        from .guard import check_ledger
+        verdict = check_ledger(safe, ledger)
+        if not verdict.ok:
+            hits = {**hits, "數字幻覺": len(verdict.unknown)}
+    return safe, hits
 
 
 def gate_bundle(app: Application, extracted: dict[str, Any], findings: list[Finding],
