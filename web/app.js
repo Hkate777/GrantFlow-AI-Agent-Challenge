@@ -42,6 +42,7 @@ const queues = [
 const tabs = {
   overview: "個案資料",
   review: "評審與批核",
+  trace: "可追溯",
   project: "項目管理",
   audit: "操作紀錄",
 };
@@ -467,6 +468,7 @@ async function loadCase(id, focus = false, refreshList = false) {
     const record = await api(casePath(id));
     if (request !== state.caseRequest) return;
     state.activeCase = record;
+    if (state.traceData?.id !== id) state.traceData = null;
     if (refreshList) upsertRecord(record);
     renderBreadcrumbs();
     renderCase(focus);
@@ -604,6 +606,97 @@ function projectView(record) {
     rows?.length ? table(columns, rows.map(render)) : el("p", "muted", "未有記錄。"))));
 }
 
+const severityTone = { info: "info", warning: "warning", error: "error", critical: "error" };
+const levelLabel = { refuse: "拒絕", degrade: "降級覆核", note: "提示" };
+const levelTone = { refuse: "error", degrade: "warning", note: "info" };
+
+function evidenceCards(data) {
+  const cards = data.cards || [];
+  if (!cards.length) return el("p", "muted", "此個案沒有可生成依據卡的核查發現。");
+  const rows = cards.map((card) => {
+    const basis = (card.basis || []).map((item) => el("div", "", el("strong", "", valueText(item.source || item.locator || "原始數據")),
+      item.quote ? el("blockquote", "quotation block-text", item.quote) : null,
+      item.value ? el("p", "line-detail", `結構化值：${valueText(item.value)}`) : null));
+    return el("details", "evidence",
+      el("summary", "", `${badge(card.rank_label || "依據", severityTone[card.severity] || "")} ${valueText(card.claim)}`),
+      el("div", "stack",
+        el("p", "", el("strong", "", "理由："), valueText(card.rationale)),
+        card.imputed ? el("p", "line-detail", `推斷標記：${valueText(card.imputed_note)}`) : null,
+        basis.length ? list(basis, "line-list") : null));
+  });
+  return panel("判定依據卡", list(rows, "line-list"),
+    el("span", "hint", `${cards.length} 張 · 規則生成、零模型`));
+}
+
+function complianceView(data) {
+  const report = data.compliance || {};
+  const hits = report.hits || [];
+  const rows = hits.map((hit) => el("div", "", el("div", "line-title",
+    badge(levelLabel[hit.level] || hit.level, levelTone[hit.level] || ""), valueText(hit.rule)),
+  el("p", "line-detail", valueText(hit.basis)),
+  hit.excerpt ? el("blockquote", "quotation block-text", hit.excerpt) : null));
+  const summary = [
+    ["是否建議拒絕", valueText(report.refuse)], ["需人工覆核", valueText(report.needs_human)],
+  ];
+  return panel("合規三級分級", el("div", "stack", pairs(summary, "assessment-totals"),
+    rows.length ? list(rows, "line-list") : el("p", "muted", "本層未命中任何規則。"),
+    el("p", "line-detail", report.coverage_statement || "")),
+  el("span", "hint", `${hits.length} 條命中`));
+}
+
+function scoreView(data) {
+  const score = data.deterministic_score || {};
+  const steps = score.steps || [];
+  const rows = steps.map((step) => [valueText(step.name), numberText(step.score), numberText(step.max_score),
+    numberText(step.weight), numberText(step.contribution)]);
+  const tableNode = steps.length ? table([
+    ["維度", ""], ["原始分", "numeric"], ["滿分", "numeric"], ["歸一化權重", "numeric"], ["百分制貢獻", "numeric"],
+  ], rows) : el("p", "muted", "沒有可評分的維度。");
+  const total = score.total === null || score.total === undefined ? "不完整（缺維度）" : numberText(score.total);
+  return panel("確定性評分", el("div", "stack", pairs([
+    ["總分", total], ["缺失維度", valueText(score.missing)],
+    ["評分來源", valueText(data.score_source)], ["權重模式", valueText(score.weights?.mode)],
+  ], "assessment-totals"), tableNode,
+    score.weights?.issues?.length ? el("p", "line-detail", `權重提示：${valueText(score.weights.issues)}`) : null),
+  el("span", "hint", "零模型 · 缺維度不補零"));
+}
+
+function evalView(data) {
+  const verdicts = data.verdicts || [];
+  if (!verdicts.length) return null;
+  const rows = verdicts.map((verdict) => [valueText(verdict.trace_id),
+    badge(verdict.rule_pass ? "規則通過" : "規則未過", verdict.rule_pass ? "ok" : "error"),
+    valueText((verdict.rules || []).map((rule) => rule.name).join("、")),
+    valueText(verdict.judge?.available ? verdict.judge.verdict : "不可用")]);
+  return panel("Trace 評測", el("div", "stack", table([
+    ["Trace", ""], ["規則判據", ""], ["檢查項", ""], ["Judge", ""],
+  ], rows), el("p", "line-detail", "以規則判據為準；Judge 僅為附加訊號，失敗不影響規則結論。")),
+  el("span", "hint", `${verdicts.length} 條`));
+}
+
+function traceabilityPanels(data) {
+  return el("div", "stack", evidenceCards(data), complianceView(data), scoreView(data), evalView(data));
+}
+
+function traceabilityView(record) {
+  const holder = el("div", "stack", el("p", "muted", "正在生成依據卡與合規分級…"));
+  if (state.traceData?.id === record.id) {
+    holder.replaceChildren(traceabilityPanels(state.traceData.data));
+    return holder;
+  }
+  state.traceRequest = (state.traceRequest || 0) + 1;
+  const request = state.traceRequest;
+  api(`${casePath(record.id)}/traceability`).then((data) => {
+    if (request !== state.traceRequest || record.id !== state.activeCase?.id) return;
+    state.traceData = { id: record.id, data };
+    holder.replaceChildren(traceabilityPanels(data));
+  }).catch((error) => {
+    if (request !== state.traceRequest) return;
+    holder.replaceChildren(panel("可追溯物料", el("p", "message error", `載入失敗：${valueText(error.message || error)}`)));
+  });
+  return holder;
+}
+
 function auditView(record) {
   const rows = [...(record.audit || [])].reverse();
   return panel("個案操作紀錄", rows.length ? table([
@@ -650,7 +743,8 @@ function renderCase(focus = false) {
     const next = { ArrowLeft: (at + keys.length - 1) % keys.length, ArrowRight: (at + 1) % keys.length, Home: 0, End: keys.length - 1 }[event.key];
     if (next !== undefined) { event.preventDefault(); selectTab(keys[next]); }
   });
-  const views = { overview: overviewView, review: reviewView, project: projectView, audit: auditView };
+  const views = { overview: overviewView, review: reviewView, trace: traceabilityView,
+    project: projectView, audit: auditView };
   const body = el("div", "case-panel", views[state.tab](record, program));
   body.id = "case-panel";
   body.setAttribute("role", "tabpanel");

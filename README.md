@@ -82,7 +82,7 @@ Pipeline 追蹤階段傳入 `region.timezone`；Web/CLI 處理含時區標記的
 | 出口審查 | `guard.py` | `review_output()` 檢查模型輸出有否洩漏系統提示、含命令痕跡、可疑外傳連結、明文憑據或非預期欄位；可疑輸出整批不採用 |
 | 數字台賬 | `guard.py` | `build_ledger()` 由原始申請與規則計算結果收錄可信數字集合；`check_ledger()` 檢查對外通知每個數字是否來自台賬，攔截模型編造的金額／分數／日期（年份與≤30序數豁免）；與注入防護互補——後者管「有沒有被導偏」，前者管「有沒有編數字」 |
 
-> **能力邊界（如實説明）**：注入偵測是規則＋結構化啟發式提示，只標記、不保證攔截所有注入；它提高人工覆核可見度，不是語意分類器。數字台賬等於信任台賬本身的完整性，且豁免序數與年份——只標記台賬外數字，不宣稱「零幻覺」。真實模型分支才會呼叫模型，MockLLM 不發出請求，但**掃描與對外輸出閘門照樣執行**——兩者覆蓋範圍與模型無關。
+> **能力邊界（如實説明）**：注入偵測採「規則＋詞彙語義分類器＋可選模型」三層。規則認已知特徵，語義層（`semantic_guard.py`，純 Python TF-IDF 最近鄰，離線確定）補「換詞不換義」的改寫，可選 LLM 專門模型提供語意判斷（MockLLM 如實回 `unavailable`）。三層都**只標記需人工覆核、不自動攔截或放行、不保證攔截所有注入**。數字台賬等於信任台賬本身的完整性，且豁免序數與年份——只標記台賬外數字，不宣稱「零幻覺」。掃描與對外輸出閘門與模型無關：MockLLM 不發出請求，但照樣執行。
 
 對外物料統一經 `output_gate.py`：Web 評審包、CLI 評審包、Excel 總表與結果通知都實際呼叫 `ensure_safe_output()`（不是文件上的口號），即使上游拼接出幻覺敏感值也會被佔位符取代；評審包內另附 `gate_report.json` 記錄命中類型與次數。抽取結果不再 `restore()` 回明文，交叉驗證全程使用去識別化視圖，避免敏感值沿 Finding 流入對外物料。私隱正則加入 Luhn 校驗與身份/護照語境要求，時間戳、項目編號與普通證件號不再被誤殺。
 
@@ -108,7 +108,7 @@ python scripts/vault_cli.py verify                         # 驗證口令與完�
 python scripts/vault_cli.py keys                           # 列出可用憑據名稱，不注入環境
 ```
 
-Web 工作台提供 `POST /api/security/scan`（注入+敏感值偵測）、`POST /api/security/review-output`（輸出審查）、`GET /api/security/vault/status`（密鑰環狀態，僅遮蔽值），均受認證保護。測試見 `tests/test_security.py`（19 項）與 `tests/test_audit_fixes.py`（11 項審查回歸）。
+Web 工作台提供 `POST /api/security/scan`（規則注入+敏感值偵測）、`POST /api/security/scan-semantic`（詞彙語義分類器＋可選 `use_llm` 專門模型、附能力邊界聲明）、`POST /api/security/review-output`（輸出審查）、`GET /api/security/vault/status`（密鑰環狀態，僅遮蔽值），均受認證保護。語義層亦已接入 `Pipeline.intake()`，CLI 與網頁共用同一套訊號。測試見 `tests/test_security.py`（19 項）、`tests/test_audit_fixes.py`（11 項審查回歸）與 `tests/test_web_traceability.py`（14 項可達性與語義回歸）。
 
 
 ## 快速開始
@@ -185,7 +185,12 @@ python cli.py --region CN    # 中國內地（簡體，個人信息保護法／�
 
 > **合規能力邊界（每次報告必附）**：「未命中不代表合規，只表示本層規則未覆蓋；人工覆核仍不可省略。」這句聲明用來治虛假安全感，絶不省略。
 
-CLI 全流程末段 `[7/7]` 會把上述物料寫入 `output/traceability/`：每案 `*_evidence.md`（依據卡）、`*_compliance.md`（合規分級）、`*_score.md`（確定性評分）、`*_trace.json`，以及 `eval_summary`（評測摘要）與 `decision_quality.md`（決策品質回看）。`Pipeline.traceability()` 供 Web 與 CLI 共用同一套生成邏輯。回歸測試見 `tests/test_traceability.py`（23 項）。
+**兩條入口皆可用，不是只有 CLI 離線物料**：
+
+- **網頁在線**：工作台每個個案新增「可追溯」分頁，經 `GET /api/cases/{id}/traceability` 即時生成並顯示依據卡、合規分級、確定性評分與 Trace 評測；資料取自已入庫個案，經輸出閘門去識別化，操作員無需跑命令列。這是能力可達性設計——五項模組對 Web 用戶同樣存在。
+- **命令行離線**：全流程末段 `[7/7]` 把上述物料寫入 `output/traceability/`（依據卡／合規分級／確定性評分／Trace／評測摘要／決策品質），適合答辯展示與存檔。
+
+兩者共用 `Pipeline.traceability()` 同一套生成邏輯；`decision_journal.py` 的品質回看屬全域 accumulate 報表，由 `decision_quality.md` 呈現。回歸測試見 `tests/test_traceability.py`（23 項）與 `tests/test_web_traceability.py`（14 項）。
 
 ## 異地部署與網絡防護
 
@@ -288,7 +293,7 @@ flowchart LR
 │   ├── serve.py                # 部署配置、限流、失敗封鎖與安全響應頭
 │   └── export.py               # 評審彙總 Excel 匯出（三個工作表，敏感欄位脫敏）
 ├── cli.py                      # 命令行一鍵跑通全流程
-├── app.py                      # FastAPI Web 工作台（create_app 工廠 + 26 個 API）
+├── app.py                      # FastAPI Web 工作台（create_app 工廠 + 30 個 API）
 ├── web/                        # 工作台前端（index.html/app.js/styles.css）
 ├── Dockerfile                  # 非 root 容器映像 + /data 持久卷 + 健康檢查
 ├── docker-compose.yml          # 一鍵容器啟動與資料卷

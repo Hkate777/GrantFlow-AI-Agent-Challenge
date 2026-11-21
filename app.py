@@ -82,6 +82,7 @@ class ScriptAuditInput(Input):
 class SecurityScanInput(Input):
     text: str = Field(max_length=200_000)
     source: str = Field(default="", max_length=200)
+    use_llm: bool = False  # 語義端點可選啟用 LLM 專門模型；Mock 如實降級
 
 
 class LoginInput(Input):
@@ -446,6 +447,15 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
         return Response(buffer.getvalue(), media_type="application/zip",
                         headers={"Content-Disposition": 'attachment; filename="reviewer-pack.zip"'})
 
+    @api.get("/api/cases/{case_id}/traceability")
+    def traceability(case_id: str, identity: Identity = Depends(_require_identity)):
+        """即時可追溯物料：依據卡、合規分級、確定性評分與 Trace 評測。
+
+        與 CLI `[7/7]` 共用同一套規則式生成邏輯；輸出已去識別化。這是能力
+        可達性端點——Web 操作員無需跑命令列即可查閱五項可追溯模組的結果。
+        """
+        return workspace.traceability(case_id)
+
     @api.get("/api/cases/{case_id}/report", response_class=PlainTextResponse)
     def report(case_id: str, identity: Identity = Depends(_require_identity)):
         detail, app = workspace.get(case_id)
@@ -498,6 +508,28 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
             "signals": [s.__dict__ for s in signals],
             "sensitive_hits": hits,
             "safe": not signals and not hits,
+            "operator": identity.display_name,
+        }
+
+    @api.post("/api/security/scan-semantic")
+    def security_scan_semantic(payload: SecurityScanInput,
+                               identity: Identity = Depends(_require_identity)):
+        """語義注入偵測：小型詞彙語義分類器 + 可選 LLM 專門模型雙軌。
+
+        回傳分數、相近樣本與能力邊界聲明；只作人工覆核提示，不自動攔截或放行。
+        可選 ``use_llm`` 時才呼叫模型（需真實模型；MockLLM 如實回 unavailable）。
+        """
+        from kkg.semantic_guard import (CAPABILITY_STATEMENT, llm_semantic_scan,
+                                        scan_semantic)
+        lexical = scan_semantic(payload.text).as_dict()
+        llm_result = None
+        if getattr(payload, "use_llm", False):
+            llm = get_llm("auto")
+            llm_result = llm_semantic_scan(payload.text, llm).as_dict()
+        return {
+            "lexical": lexical,
+            "llm": llm_result,
+            "capability_statement": CAPABILITY_STATEMENT,
             "operator": identity.display_name,
         }
 

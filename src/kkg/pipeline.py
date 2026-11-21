@@ -17,6 +17,7 @@ from pathlib import Path
 from .check import check_completeness, detect_duplicates
 from .extract import anomaly_scan, cross_verify, extract_fields
 from .guard import injection_findings, scan_prompt_injection
+from .semantic_guard import scan_semantic, semantic_findings
 from .ingest import ingest_dir
 from .llm import LLM, get_llm
 from .models import Application, AuditTrail, Finding, Milestone, ReviewScore
@@ -26,6 +27,24 @@ from .region import Region
 from .review import assess, followup_todos
 from .summarize import reviewer_pack
 from .track import management_report
+
+
+def _chunks(text: str, size: int) -> list[str]:
+    """把長文字切段以利語義掃描；按換行邊界盡量保持語句完整。"""
+    if len(text) <= size:
+        return [text]
+    result: list[str] = []
+    buf: list[str] = []
+    length = 0
+    for line in text.splitlines(keepends=True):
+        if length and length + len(line) > size:
+            result.append("".join(buf))
+            buf, length = [], 0
+        buf.append(line)
+        length += len(line)
+    if buf:
+        result.append("".join(buf))
+    return result
 
 
 class Pipeline:
@@ -55,6 +74,20 @@ class Pipeline:
             self.audit.log("guard", "pre_model_scan",
                            f"{app.app_id} · {len(security_signals)}處 · 規則式提示，不保證攔截")
         findings = injection_findings(security_signals, app_id=app.app_id)
+
+        # 語義層：補規則認不出的「換詞不換義」改寫。與規則式掃描一樣前置、
+        # 只標記需人工覆核，絶不(auto)攔截或放行；分數與相近樣本一併留痕。
+        # 大字串分段掃描，避免整份附件過長時單一相似度被稀釋。
+        if blob.strip():
+            semantic_hits = [
+                scan_semantic(chunk) for chunk in _chunks(blob, 1500)
+            ]
+            top = max(semantic_hits, key=lambda s: s.score, default=None)
+            if top is not None:
+                self.audit.log("guard", "semantic_scan",
+                               f"{app.app_id} · {top.label} · 分數{top.score:.2f} · "
+                               f"詞彙語義訊號，僅提示不保證攔截")
+                findings += semantic_findings(top, app_id=app.app_id)
 
         # 私隱防護：送LLM前先去識別化，抽取與交叉驗證全程只見佔位符；
         # 不再把抽取結果 restore() 回明文，避免敏感值沿 Finding 流入評審包。

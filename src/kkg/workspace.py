@@ -200,6 +200,43 @@ class Workspace:
             records = self.store.list(connection, case["application"]["program"])
         return self._view(case, self._batch_findings(records)), _application(case)
 
+    def traceability(self, case_id: str) -> dict:
+        """為單一個案即時生成可追溯物料：依據卡、合規分級、確定性評分與評測。
+
+        與 CLI 的 ``[7/7]`` 共用 ``Pipeline.traceability()``，差別只在於資料
+        取自已入庫的個案而非批次目錄——Web 操作員因此無需跑 CLI 也能看到
+        同一套物料。全部規則式、零 LLM、零新數字，且對外輸出經輸出閘門
+        去識別化，避免依據卡摘錄夾帶敏感值。
+
+        已簽發個案沿用簽發時的評分；未簽發個案用目前暫存的評分作示範，
+        兩者皆標明來源。發現不足時仍回傳空卡片與聲明，絶不虛構判定。
+        """
+        from .models import ReviewScore
+        from .pipeline import Pipeline
+
+        detail, app = self.get(case_id)
+        program_id = app.program
+        program = self.programs.get(program_id)
+        if program is None:
+            program = Program(program_id, program_id)
+        findings = [
+            Finding(**{**row, "finding_type": FindingType(row["finding_type"]),
+                       "severity": Severity(row["severity"])})
+            for row in detail["findings"]
+        ]
+        scores = [ReviewScore(**row) for row in detail["scores"]]
+        # traceability 是零 LLM 流程；MockLLM 只作為 Pipeline 佔位，不發出請求。
+        result = Pipeline(program, MockLLM()).traceability(app, findings, scores)
+        result["signed"] = bool(detail["decision"])
+        result["score_source"] = "簽發時評分" if detail["decision"] else "目前暫存評分（示範）"
+        # 對外物料一律經輸出閘門：整份 JSON 去識別化後才回傳前端。
+        from .output_gate import gate_text
+        safe, hits = gate_text(json.dumps(result, ensure_ascii=False))
+        gated = json.loads(safe)
+        if hits:
+            gated["gate_hits"] = hits
+        return gated
+
     def submit(self, metadata: dict, files: list[tuple[str, bytes]], channel: str,
                *, actor: str | None = None) -> dict:
         digest = fingerprint(metadata, files)
