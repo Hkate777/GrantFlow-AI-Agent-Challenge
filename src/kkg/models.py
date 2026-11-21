@@ -6,7 +6,13 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 import json
+import unicodedata
 import uuid
+
+
+def identity_key(value: str) -> str:
+    """結構化身份鍵：統一字形、空白與大小寫；舊資料的姓名亦可安全回退。"""
+    return unicodedata.normalize("NFKC", value or "").strip().casefold()
 
 
 def _now() -> str:
@@ -86,6 +92,8 @@ class Finding:
     source: str = ""          # 觸發來源（規則名/文檔名）
     needs_human: bool = False  # 是否需人工複核
     application_ids: list[str] = field(default_factory=list)  # 批次發現涉及的申請
+    # 結構化主體標識（例如利益衝突所屬的評審帳號 ID）；舊記錄留空時兼容姓名比對。
+    subject_id: str = ""
 
 
 @dataclass
@@ -93,6 +101,8 @@ class ReviewScore:
     reviewer: str
     criteria: dict[str, float]  # 維度 -> 分數
     comment: str = ""
+    # 評審員的結構化身份：Web 工作台由服務端登入帳號綁定，舊資料回退至姓名正規化。
+    reviewer_id: str = ""
 
     @property
     def total(self) -> float:

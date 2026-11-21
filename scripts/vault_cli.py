@@ -23,12 +23,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from kkg.secrets import SecretVault, VaultError, apply_vault_to_env  # noqa: E402
+from kkg.secrets import SecretVault, VaultError, vault_key_names  # noqa: E402
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="GrantFlow 加密密鑰環管理")
-    ap.add_argument("action", choices=["set", "get", "list", "delete", "verify", "inject"])
+    ap.add_argument("action", choices=["set", "get", "list", "delete", "verify", "keys", "inject"])
     ap.add_argument("name", nargs="?", help="憑據名稱，如 OPENAI_API_KEY")
     ap.add_argument("value", nargs="?", help="set 時的憑據值")
     ap.add_argument("--reveal", action="store_true", help="get 時顯示明文（預設只顯示遮蔽值）")
@@ -72,9 +72,11 @@ def main() -> None:
             vault.verify()
             print(f"口令正確、檔案完整。共 {len(vault.names())} 項憑據。")
 
-        elif args.action == "inject":
-            injected = apply_vault_to_env(vault)
-            print(f"已注入進程環境的憑據：{'、'.join(injected) or '無'}")
+        elif args.action in {"keys", "inject"}:
+            # 為安全起見不再注入 os.environ；模型客戶端直接向密鑰環取值。
+            names = vault_key_names(vault)
+            print(f"可供模型客戶端使用的憑據：{'、'.join(names) or '無'}")
+            print("明文不會寫入進程環境；此指令只列出名稱。")
     except VaultError as exc:
         raise SystemExit(f"[錯誤] {exc}")
 

@@ -21,7 +21,9 @@ except ImportError:
 
 from .llm import get_llm                                   # noqa: E402
 from .models import Finding, ReviewScore                   # noqa: E402
+from .output_gate import gate_text                         # noqa: E402
 from .pipeline import Pipeline, load_applications           # noqa: E402
+from .privacy import Redactor                               # noqa: E402
 from .program import Program                                # noqa: E402
 from .review import STATUS_LABELS, _label, aggregate, assess  # noqa: E402
 
@@ -32,9 +34,11 @@ HEADER_FONT = Font(bold=True, color="FFFFFF")
 def export_workbook(prog: Program, apps: list, findings: dict[str, list[Finding]],
                     scores: dict[str, list[ReviewScore]], out: Path,
                     redactor=None) -> Path:
-    """匯出評審總表；傳入redactor時對電郵、發現說明等敏感欄位去識別化。"""
+    """匯出評審總表；所有文字欄位通過輸出閘門後才寫入試算表。"""
+    active = redactor or Redactor()
+
     def _mask(v: str) -> str:
-        return redactor.redact(str(v)) if redactor else str(v)
+        return gate_text(str(v), active)[0]
 
     wb = openpyxl.Workbook()
 
@@ -59,8 +63,8 @@ def export_workbook(prog: Program, apps: list, findings: dict[str, list[Finding]
         serious = sum(1 for f in fd if f.severity.value in ("error", "critical"))
         human = sum(1 for f in fd if f.needs_human)
         suggestion = STATUS_LABELS[agg["status"]]
-        ws.append([a.app_id, prog.name, _mask(a.title), _mask(a.applicant), _mask(a.email),
-                   len(fd), serious, human, total if total is not None else "-", suggestion])
+        ws.append([_mask(a.app_id), _mask(prog.name), _mask(a.title), _mask(a.applicant), _mask(a.email),
+                   len(fd), serious, human, total if total is not None else "-", _mask(suggestion)])
     ws.freeze_panes = "A2"
     for col, width in zip("ABCDEFGHIJ", [16, 28, 34, 22, 28, 10, 12, 14, 12, 20]):
         ws.column_dimensions[col].width = width
@@ -72,8 +76,8 @@ def export_workbook(prog: Program, apps: list, findings: dict[str, list[Finding]
         c.fill, c.font = HEADER_FILL, HEADER_FONT
     for a in apps:
         for f in findings.get(a.app_id, []):
-            ws2.append([a.app_id, f.finding_type.value, f.severity.value,
-                        _mask(f.message), f.source, "是" if f.needs_human else "否"])
+            ws2.append([_mask(a.app_id), f.finding_type.value, f.severity.value,
+                        _mask(f.message), _mask(f.source), "是" if f.needs_human else "否"])
     ws2.freeze_panes = "A2"
     for col, width in zip("ABCDEF", [16, 16, 12, 70, 24, 14]):
         ws2.column_dimensions[col].width = width
@@ -89,7 +93,7 @@ def export_workbook(prog: Program, apps: list, findings: dict[str, list[Finding]
         per_reviewer = aggregate(rows, prog).get("per_reviewer_weighted", {})
         for s in rows:
             normalized = {_label(k): v for k, v in s.criteria.items()}
-            ws3.append([a.app_id, _mask(s.reviewer)] +
+            ws3.append([_mask(a.app_id), _mask(s.reviewer)] +
                        [normalized.get(_label(k), 0) for k in criteria] +
                        [per_reviewer.get(s.reviewer, "-"), _mask(s.comment)])
     ws3.freeze_panes = "A2"

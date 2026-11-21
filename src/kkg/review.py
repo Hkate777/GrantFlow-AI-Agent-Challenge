@@ -12,7 +12,7 @@ import math
 import unicodedata
 from statistics import mean, pstdev
 
-from .models import Finding, FindingType, ReviewScore, Severity
+from .models import Finding, FindingType, ReviewScore, Severity, identity_key
 from .program import Program
 
 
@@ -69,8 +69,12 @@ def _validate_scores(scores: list[ReviewScore], prog: Program) -> tuple[list[Rev
         if invalid:
             errors.append(f"{reviewer} 的評分超出範圍：{'、'.join(invalid)}。")
             continue
+        # 結構化身份優先；舊資料沒有 reviewer_id 時以姓名正規化鍵回退。
+        reviewer_id = identity_key(score.reviewer_id) if isinstance(score.reviewer_id, str) and score.reviewer_id.strip() \
+            else identity_key(reviewer)
         valid.append(ReviewScore(reviewer, {criteria[name].name: value for name, value in values.items()},
-                                 score.comment if isinstance(score.comment, str) else ""))
+                                 score.comment if isinstance(score.comment, str) else "",
+                                 reviewer_id=reviewer_id))
     return valid, errors
 
 
@@ -134,9 +138,13 @@ def assess(scores: list[ReviewScore], program: Program, findings: list[Finding],
     result = aggregate(scores, program)
     serious = {finding.finding_type for finding in findings
                if finding.severity in {Severity.ERROR, Severity.CRITICAL}}
-    conflicted = {finding.detail.casefold() for finding in findings
-                  if finding.finding_type == FindingType.CONFLICT and finding.detail}
-    scored_by = {score.reviewer.strip().casefold() for score in scores if isinstance(score.reviewer, str)}
+    # 衝突比對使用結構化 subject_id / reviewer_id；舊記錄沒有結構化 ID 時
+    # 才回退到姓名正規化，避免同名或改名造成誤判/漏判。
+    conflicted = {identity_key(getattr(finding, "subject_id", "") or finding.detail)
+                  for finding in findings if finding.finding_type == FindingType.CONFLICT
+                  and (getattr(finding, "subject_id", "") or finding.detail)}
+    scored_by = {identity_key(score.reviewer_id) if score.reviewer_id else identity_key(score.reviewer)
+                 for score in scores if isinstance(score.reviewer, str)}
     active_conflicts = sorted(conflicted & scored_by)
     holds = []
     if result["flags"] and not reviewed:
@@ -157,9 +165,14 @@ def assess(scores: list[ReviewScore], program: Program, findings: list[Finding],
         holds.append("needs_review")
 
     total = result["weighted_total"]
+    # 否決代表人工裁定「不通過」：缺材料/資格問題可在完成複議記錄後否決；
+    # 評分本身無效或人數不足時仍需先更正，不能跳過評審程序。
+    procedural_holds = {"invalid_scores", "insufficient_reviews", "pending_scores"}
+    decline_allowed = (not holds) or (
+        reviewed and not active_conflicts and not procedural_holds.intersection(holds))
     return {**result, "holds": holds, "status": holds[0] if holds else "awaiting_decision",
             "approval_allowed": not holds and total is not None and total >= pass_threshold,
-            "decline_allowed": not holds or (reviewed and "needs_compliance" in holds and not active_conflicts),
+            "decline_allowed": decline_allowed,
             "active_conflicts": active_conflicts, "notice": None}
 
 

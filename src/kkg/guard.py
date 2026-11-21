@@ -12,6 +12,9 @@
 
 設計原則：所有發現只記類型、位置與已去識別化的短摘錄；原始敏感值不進
 日誌、不落盤；防護為建議性標記，最終取捨由人工作出（人機協同）。
+
+能力邊界（必須如實對外説明）：本層是「規則 + 啟發式提示」，不是語意
+分類器，也不能保證攔截所有注入；它只提高人工覆核的可見度。
 """
 from __future__ import annotations
 
@@ -55,6 +58,19 @@ _PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ("工具越權", re.compile(r"(?:刪除(?:所有|全部)文件|執行命令|運行命令|系統命令|shell\s*命令)", re.I), "warning"),
     ("編碼繞過", re.compile(r"(?:base64\s*decode|decode\s*\([^)]*base64|fromcharcode|\\x[0-9a-f]{2}\\x[0-9a-f]{2})", re.I), "warning"),
 ]
+
+# 規則式清單以外的結構化啟發線索；命中同樣只標記，不影響自動判定。
+_HEURISTIC_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
+    ("編碼載荷（啟發式）", re.compile(r"[A-Za-z0-9+/]{48,}={0,2}"), "warning"),
+    ("角色設定（啟發式）", re.compile(
+        r"(?:\bdeveloper\s+mode\b|\bsystem\s+role\b|\"role\"\s*:\s*\"system\"|"
+        r"開發者模式|系統角色|管理員指令)", re.I), "warning"),
+    ("間接指令（啟發式）", re.compile(
+        r"(?:when\s+(?:you\s+)?(?:read|process|see)\s+this|"
+        r"如果你(?:正在)?(?:閱讀|讀到|處理)|讀到這段文字後)", re.I), "warning"),
+]
+
+DETECTION_SCOPE = "規則與啟發式提示；僅供人工覆核，不保證攔截所有注入"
 
 _UNTRUSTED_OPEN = "《不可信申請內容·開始》"
 _UNTRUSTED_CLOSE = "《不可信申請內容·結束》"
@@ -125,7 +141,7 @@ def scan_prompt_injection(text: str, *, locator: str = "") -> list[InjectionSign
         signals.append(InjectionSignal(
             "隱藏字符", "warning", "／".join(invisible), locator))
     seen: set[str] = set()
-    for category, pattern, severity in _PATTERNS:
+    for category, pattern, severity in (*_PATTERNS, *_HEURISTIC_PATTERNS):
         # 同一類別只報一次最長摘錄，避免重複條目淹沒人工覆核視圖
         matches = [_redact_excerpt(m.group()) for m in pattern.finditer(clean)]
         if not matches:
@@ -134,7 +150,8 @@ def scan_prompt_injection(text: str, *, locator: str = "") -> list[InjectionSign
             continue
         seen.add(category)
         excerpt = max(matches, key=len)
-        signals.append(InjectionSignal(category, severity, excerpt, locator))
+        signals.append(InjectionSignal(
+            category, severity, f"{excerpt}（{DETECTION_SCOPE}）", locator))
     return signals
 
 

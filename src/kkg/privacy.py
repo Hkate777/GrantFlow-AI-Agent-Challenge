@@ -39,6 +39,47 @@ class PrivacyReport:
         return f"已遮蔽{self.mask_count}處敏感資訊（{'、'.join(parts)}）"
 
 
+def _luhn_ok(value: str) -> bool:
+    """Luhn 校驗：避免把時間戳、項目編號當成銀行卡號遮蔽。"""
+    digits = re.sub(r"\D", "", value)
+    if not 13 <= len(digits) <= 19:
+        return False
+    total = 0
+    parity = len(digits) % 2
+    for index, char in enumerate(digits):
+        digit = int(char)
+        if index % 2 == parity:
+            digit *= 2
+            if digit > 9:
+                digit -= 9
+        total += digit
+    return total % 10 == 0
+
+
+def _nearby(text: str, start: int, words: tuple[str, ...], window: int = 24) -> bool:
+    context = text[max(0, start - window):start].casefold()
+    return any(word in context for word in words)
+
+
+def _accept(kind: str, match: re.Match[str], text: str) -> bool:
+    """正則命中後的語意覆核：降低誤傷普通編號的機會。"""
+    if kind == "bankcard":
+        digits = re.sub(r"\D", "", match.group())
+        if not _luhn_ok(digits):
+            return False
+        # 13–14 位較可能是 Unix 時間戳或內部編號，須有卡片語境才遮蔽。
+        return len(digits) >= 15 or _nearby(
+            text, match.start(), ("card", "visa", "master", "unionpay", "卡", "銀聯"))
+    if kind == "passport":
+        return _nearby(text, match.start(), ("passport", "護照", "护照"))
+    if kind == "hkid":
+        # 括號校驗位是香港身份證的強特徵；沒有括號時須有身份語境，
+        # 否則「項目號 A1234567」等普通編號會被誤殺。
+        return "(" in match.group() or _nearby(
+            text, match.start(), ("身份證", "身分證", "identity card", "hkid", "證件"))
+    return True
+
+
 # 各類敏感資訊的正則；順序影響遮蔽優先級（長/具體的在前）
 _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("email", re.compile(r"[\w.+-]+@[\w-]+\.[\w.]{2,}")),
@@ -84,7 +125,11 @@ class Redactor:
             return text
         out = text
         for kind, pattern in _PATTERNS:
-            out = pattern.sub(lambda m: self._token(m.group(), kind), out)
+            def replace(match: re.Match[str], *, _kind: str = kind) -> str:
+                if not _accept(_kind, match, out):
+                    return match.group()
+                return self._token(match.group(), _kind)
+            out = pattern.sub(replace, out)
         if self.mask_amounts:
             out = re.sub(r"(?<![A-Za-z0-9])(?:\d{1,3}(?:,\d{3})+|\d{5,})(?:\.\d+)?",
                          lambda m: self._token(m.group(), "amount"), out)
@@ -122,7 +167,7 @@ def scan_sensitive(text: str) -> dict[str, int]:
     """只掃描不遮蔽，返回各類敏感資訊命中次數（供UI提示用）。"""
     counts: dict[str, int] = {}
     for kind, pattern in _PATTERNS:
-        n = len(pattern.findall(text))
+        n = sum(1 for match in pattern.finditer(text) if _accept(kind, match, text))
         if n:
             counts[kind] = n
     return counts
@@ -149,7 +194,7 @@ def scan_output_leaks(text: str) -> dict[str, int]:
 def ensure_safe_output(text: str, redactor: Redactor | None = None) -> tuple[str, dict[str, int]]:
     """確保對外文字安全：發現敏感值即以佔位符取代，回傳 (安全文字, 命中統計)。
 
-    这是「輸出閘門」的便捷实现：即使上游拼接到幻覺敏感值，也不會外洩。
+    這是「輸出閘門」的便捷實作：即使上游拼接到幻覺敏感值，也不會外洩。
     """
     hits = scan_output_leaks(text)
     if not hits:

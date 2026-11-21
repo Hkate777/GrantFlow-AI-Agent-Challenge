@@ -11,7 +11,7 @@
 | 容器 | `./scripts/start.sh docker` | 本機或自建伺服器一鍵啟動 |
 | 雲端 | 複製 `deploy/fly.toml` 或 `deploy/render.yaml` 後部署 | 需在異地隨時啟動、自動重啟 |
 
-本機模式只監聽 `127.0.0.1`，即使忘記設防火牆也不會直接暴露到公網。遠端與容器模式把監聽地址改為 `0.0.0.0`，必須同時設定 `GRANTFLOW_ALLOWED_HOSTS` 為實際對外域名。
+本機模式只監聽 `127.0.0.1`，即使忘記設防火牆也不會直接暴露到公網。遠端與容器模式把監聽地址改為 `0.0.0.0`，必須同時設定 `GRANTFLOW_ALLOWED_HOSTS` 為實際對外域名。**遠端模式不會建立弱口令演示賬號**（demo/reviewer_demo/approver_demo/finance_demo）；若沿用本機資料庫，啟動時會自動停用這些賬號，並由 `GRANTFLOW_BOOTSTRAP_PASSWORD` 建立或保留管理員。
 
 容器資料寫入具名卷 `grantflow-data`，掛載點 `/data`；`grantflow.sqlite3`（個案）與 `auth.sqlite3`（帳號與工作階段）都在該目錄，重建容器不會遺失資料。備份時直接複製卷內檔案，並停止服務後操作以確保一致性。
 
@@ -89,6 +89,8 @@ Origin 檢查會以 `X-Forwarded-Proto` 與 `X-Forwarded-Host` 還原對外地�
 6. **安全日誌**：`output/security.log` 以 JSON 行記錄事件、時間、地址、路徑與狀態碼；不含請求本文、授權頭或口令，並對 `password=`/`token=` 等形式再遮蔽。
 7. **代理標頭信任邊界**：只有 `GRANTFLOW_TRUST_PROXY=true` 才讀取 `X-Forwarded-For`，且取最右值（由最後一跳代理追加），降低客戶端偽造的風險。
 8. **請求大小上限**：表單與附件沿用收件層的檔案上限，超額請求在進入業務邏輯前回 413。
+9. **身份與輸出**：Basic 已驗證憑據有 5 分鐘記憶體快取以避免每請求重算 scrypt，停用賬號即時清空；所有對外物料（評審包、Excel、通知）必經 `output_gate.py` 的 `ensure_safe_output()`。注入偵測只作提示、不保證攔截，仍須人工覆核。
+10. **密鑰邊界**：`vault_cli.py keys` 只列出可用憑據名稱；模型客戶端直接向密鑰環取值，明文不寫入 `os.environ`，避免從 `/proc/<pid>/environ` 外洩。
 
 以上防護攔截的是常見的探測、暴力嘗試與資源消耗攻擊。它不是 WAF 的替代品；正式服務仍應配合防火牆、平台層 DDoS 防護與及時更新依賴。
 

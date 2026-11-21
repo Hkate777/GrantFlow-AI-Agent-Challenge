@@ -169,7 +169,7 @@ class SecretVault:
         return [{"name": name, "value": self.mask(data[name])} for name in sorted(data)]
 
     def export_env(self) -> dict[str, str]:
-        """解密全部憑據為 dict，僅供同進程內注入 LLM 客戶端；不可列印。"""
+        """解密全部憑據為 dict，僅供同進程內直接交給 LLM 客戶端；不可列印或寫入環境。"""
         data, _, _ = self._load()
         return dict(data)
 
@@ -179,12 +179,8 @@ class SecretVault:
         return True
 
 
-def apply_vault_to_env(vault: SecretVault | None = None) -> list[str]:
-    """把密鑰環中的 Azure/OpenAI/Anthropic/Gemini 憑據注入當前進程環境。
-
-    只補足尚未設定的環境變數（環境既有值優先），且不回傳任何明文；
-    回傳已注入的變數名稱清單供審計記録。
-    """
+def vault_key_names(vault: SecretVault | None = None) -> list[str]:
+    """列出可供 LLM 客戶端使用的憑據名稱；絶不回傳明文，也不寫入環境。"""
     if vault is None:
         try:
             vault = SecretVault()
@@ -193,16 +189,19 @@ def apply_vault_to_env(vault: SecretVault | None = None) -> list[str]:
     if not vault.exists():
         return []
     try:
-        secrets_map = vault.export_env()
+        return sorted(name for name in vault.export_env() if name in _VAULT_KEYS)
     except VaultError:
         return []
-    injected: list[str] = []
-    for name, value in secrets_map.items():
-        if os.environ.get(name):
-            continue
-        os.environ[name] = value
-        injected.append(name)
-    return injected
+
+
+def apply_vault_to_env(vault: SecretVault | None = None) -> list[str]:
+    """向後相容別名：已停止把明文注入 os.environ，只回傳可用憑據名稱。
+
+    原因：即使不落盤，寫入環境變數後仍可從 /proc/<pid>/environ 或
+    子進程讀到明文。LLM 客戶端現在直接向 SecretVault 取值，明文只短暫
+    存在於記憶體，不再進入進程環境。
+    """
+    return vault_key_names(vault)
 
 
 _VAULT_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",

@@ -91,7 +91,9 @@ submit（表單/.eml/資料夾）→ 建立個案（含計劃快照 + 服務端�
 
 每次操作都做版本號檢查（`revision`），過期操作被拒絕；`_evaluate` 對已簽發個案直接回傳簽發時的 assessment 與 findings，保證歷史結果不隨規則更新而漂移。
 
-**安全閘門（貫穿兩個入口）**：申請內容一律視為不可信輸入。`intake` 先以 `guard.scan_prompt_injection` 偵測注入（命中轉 `FindingType.SECURITY`，`needs_human=True`，只記類型與已去識別化摘錄，絶不執行內容）；送模型前 `privacy.Redactor` 去識別化、`guard.wrap_untrusted` 隔離包裹、`harden_prompt` 附加最高優先隔離宣告；模型輸出經 `guard.review_output` 審查，可疑即整批不採用。對外發布前再用 `ensure_safe_output` 把關。API 憑據由 `secrets.SecretVault` 加密存放，`llm._key()` 優先環境變數、其次密鑰環，明文不進日誌。
+**安全閘門（貫穿兩個入口）**：申請內容一律視為不可信輸入。`intake` 在**任何模型呼叫之前**先以 `guard.scan_prompt_injection` 偵測注入（規則＋結構化啟發式；命中轉 `FindingType.SECURITY`，`needs_human=True`，只記類型與已去識別化摘錄，絶不執行內容；**只作提示，不保證攔截**）；送模型前 `privacy.Redactor` 去識別化、`guard.wrap_untrusted` 隔離包裹、`harden_prompt` 附加最高優先隔離宣告；模型輸出經 `guard.review_output` 審查，可疑即整批不採用。MockLLM 不發出模型請求，但掃描與對外閘門照樣執行。抽取結果不再 `restore()` 回明文，交叉驗證使用去識別化視圖。
+
+**對外物料出口**：`output_gate.py` 是 `ensure_safe_output()` 的實際呼叫點——Web 評審包、CLI 評審包、Excel 總表與結果通知必經該層，命中類型與次數寫入 `gate_report.json`。身份方面，Basic 已驗證憑據有短時内存快取（停用即清空）；遠端模式停用弱口令演示賬號，評分身份綁定登入帳號，利益衝突以 `subject_id`/`reviewer_id` 結構化比對（舊記錄回退至姓名正規化）。API 憑據由 `secrets.SecretVault` 加密存放，`llm._key()` 優先環境變數、其次密鑰環；明文不進日誌、不落盤，也**不再注入 `os.environ`**。
 
 ## 4. 多地區審查
 

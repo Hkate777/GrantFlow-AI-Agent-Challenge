@@ -95,7 +95,7 @@ def test_remote_mode_allows_non_loopback_but_requires_auth(tmp_path):
     config = RuntimeConfig(host="0.0.0.0", allowed_hosts=("testserver",))
     client = TestClient(app.create_app(tmp_path / "cases.sqlite3", runtime=config),
                         client=("198.51.100.7", 41000))
-    # 遠端連線不再被網路閘擋（403），而是正常要求認證（401）。
+    # 遠端連線不再被網絡閘擋（403），而是正常要求認證（401）。
     assert client.get("/api/cases").status_code == 401
 
 
@@ -129,7 +129,9 @@ def test_foreign_origin_rejected_for_writes(tmp_path):
     assert response.status_code == 403
 
 
-def test_reverse_proxy_origin_matches_public_host(tmp_path):
+def test_reverse_proxy_origin_matches_public_host(tmp_path, monkeypatch):
+    # 遠端模式不再建立弱口令演示賬號，改用管理員登入。
+    monkeypatch.setenv("GRANTFLOW_BOOTSTRAP_PASSWORD", "admin-pass-123")
     config = RuntimeConfig(host="0.0.0.0", allowed_hosts=("grantflow.example.edu.hk",),
                            trust_proxy=True)
     client = TestClient(app.create_app(tmp_path / "cases.sqlite3", runtime=config),
@@ -142,6 +144,6 @@ def test_reverse_proxy_origin_matches_public_host(tmp_path):
         "X-Forwarded-For": "198.51.100.7",
     }
     response = client.post("/api/auth/login",
-                           json={"username": "demo", "password": "demo"},
+                           json={"username": "admin", "password": "admin-pass-123"},
                            headers=headers)
     assert response.status_code == 200

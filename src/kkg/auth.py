@@ -13,12 +13,17 @@ import hmac
 import os
 import secrets
 import sqlite3
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
 SESSION_TTL_HOURS = 12
+# 已驗證 Basic 憑據的短時快取：避免每請求重算 scrypt（約 27 ms/次）。
+# 只保存憑據的哈希與服務端身份，不保存口令；停用帳號時立即清空。
+BASIC_CACHE_TTL_SECONDS = 300
 
 
 class AuthError(Exception):
@@ -67,6 +72,8 @@ class AuthStore:
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
+        self._basic_cache: dict[str, tuple[Identity, float]] = {}
+        self._basic_lock = threading.Lock()
         with self._connect() as connection:
             self._ensure_schema(connection)
 
@@ -124,6 +131,9 @@ class AuthStore:
             if disabled:
                 connection.execute(
                     "UPDATE sessions SET revoked=1 WHERE account_id=?", (account_id,))
+        # 停用即時生效：快取的 Basic 身份一併失效。
+        with self._basic_lock:
+            self._basic_cache.clear()
         return cursor.rowcount == 1
 
     def list_accounts(self) -> list[dict]:
@@ -132,9 +142,9 @@ class AuthStore:
             return [dict(row) for row in connection.execute(
                 "SELECT id, display_name, role, disabled, created_at FROM accounts ORDER BY id")]
 
-    def ensure_defaults(self, bootstrap_password: str | None = None) -> dict:
-        """首次啟動建立角色演示賬戶：admin（口令來自環境或隨機，由調用方打印）
-        與四個角色賬號（口令均為 demo，正式環境請停用——P0-07 角色矩陣的演示入口）。"""
+    def ensure_defaults(self, bootstrap_password: str | None = None, *, demo: bool = True) -> dict:
+        """首次啟動建立賬戶。admin 口令來自環境或隨機；遠端部署（demo=False）
+        絶不建立弱口令演示賬號，避免職責分離形同虛設。"""
         created: dict[str, str] = {}
         with self._connect() as connection:
             self._ensure_schema(connection)
@@ -143,15 +153,14 @@ class AuthStore:
             return created
         admin_password = bootstrap_password or secrets.token_urlsafe(12)
         self.create_account("admin", "系統管理員", admin_password, role="admin")
-        self.create_account("demo", "本機演示員", "demo", role="operator")
-        self.create_account("reviewer_demo", "評審員（演示）", "demo", role="reviewer")
-        self.create_account("approver_demo", "主管（演示）", "demo", role="approver")
-        self.create_account("finance_demo", "財務（演示）", "demo", role="finance")
+        if demo:
+            self.create_account("demo", "本機演示員", "demo", role="operator")
+            self.create_account("reviewer_demo", "評審員（演示）", "demo", role="reviewer")
+            self.create_account("approver_demo", "主管（演示）", "demo", role="approver")
+            self.create_account("finance_demo", "財務（演示）", "demo", role="finance")
+            created.update({"demo": "demo", "reviewer_demo": "demo",
+                            "approver_demo": "demo", "finance_demo": "demo"})
         created["admin"] = admin_password
-        created["demo"] = "demo"
-        created["reviewer_demo"] = "demo"
-        created["approver_demo"] = "demo"
-        created["finance_demo"] = "demo"
         return created
 
     # ---------- 認證 ----------
@@ -194,16 +203,26 @@ class AuthStore:
         return self._identity(account)
 
     def identity_from_basic(self, authorization: str | None) -> Identity:
-        """解析 HTTP Basic 憑據；每次請求都重查賬號狀態——停用即時生效。"""
+        """解析 HTTP Basic 憑據；短時快取已驗證身份，停用時由 set_disabled 清空。"""
         import base64
         if not authorization or not authorization.lower().startswith("basic "):
             raise AuthError("請先登入。")
+        # 快取鍵是憑據的 SHA-256，不保存口令明文；命中後仍受停用清空與 TTL 約束。
+        key = hashlib.sha256(authorization.encode("utf-8")).hexdigest()
+        now = time.monotonic()
+        with self._basic_lock:
+            cached = self._basic_cache.get(key)
+            if cached and cached[1] > now:
+                return cached[0]
         try:
             decoded = base64.b64decode(authorization.split(" ", 1)[1].strip()).decode("utf-8")
             username, _, password = decoded.partition(":")
         except (ValueError, UnicodeError) as exc:
             raise AuthError("認證憑據格式無效。") from exc
-        return self.verify_login(username, password)
+        identity = self.verify_login(username, password)
+        with self._basic_lock:
+            self._basic_cache[key] = (identity, now + BASIC_CACHE_TTL_SECONDS)
+        return identity
 
     def identity_from_header(self, authorization: str | None) -> Identity:
         """Bearer 會話優先，其次 Basic；無憑據即 401。"""

@@ -14,6 +14,7 @@ from .extract import cross_verify, extract_fields
 from .llm import MockLLM
 from .money import parse_hkd
 from .models import Application, Document, DocType, EvidenceSpan, Finding, FindingType, Milestone, ReviewScore, Severity
+from .output_gate import gate_text
 from .pipeline import Pipeline
 from .program import Program
 from .review import aggregate, assess, followup_todos, result_notice
@@ -308,8 +309,9 @@ class Workspace:
                 raise WorkspaceConflict("個案仍有待處理事項，或分數未達通過門檻。")
             app = _application(case)
             program = self.program(app.program)
+            notice, _ = gate_text(result_notice(app.app_id, app.title, assessment, outcome == "approved"))
             assessment.update(status=outcome, holds=[], approval_allowed=False, decline_allowed=False,
-                              notice=result_notice(app.app_id, app.title, assessment, outcome == "approved"))
+                              notice=notice)
             assessment["todos"] = followup_todos(app.app_id, assessment)
             case["decision"] = {
                 "actor": actor, "reason": reason, "outcome": outcome, "at": _now(),

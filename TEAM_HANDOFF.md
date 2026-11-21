@@ -18,13 +18,13 @@ GrantFlow 對應「智賦香江」場景 ⑯「申請評審與項目管理流程
 
 | 項目 | 現況 |
 |---|---|
-| 測試 | **141/141 通過**（`python -m pytest tests -q`；含字形 15 項、安全 19 項、角色矩陣 10 項） |
+| 測試 | **170/170 通過**（`python -m pytest tests -q`；含安全 19 項、時區 7 項、部署防護 11 項、審查回歸 11 項） |
 | 語言檢查 | 通過（OpenCC `s2hk` 警告模式；`data/demo` 舊簡體輸入已豁免） |
 | Web 冒煙 | `/`、`app.js`、`styles.css`、`/api/program`、`/api/regions`、`/api/cases` 全 200 |
 | 兩線整合 | **已完成**：Web 工作台線 + 多地區/隱私/導出線合併（見 §2） |
 | 乾淨安裝 | 隔離 venv 只裝 `requirements.txt` → 全綠（依賴已鎖定相容區間並補 `httpx`/`httpx2`/`python-multipart`，CI 綠燈） |
-| 身份與角色 | **P0-06/07 已落地**（隊友提交 `76cf311`）：所有 /api 需 HTTP Basic；`_require_role()` 守衛工廠 + 六個 `ROLE_*` 常數；**角色矩陣**：收件/補件/複議=operator、評分=reviewer、簽發=approver、台帳=finance、賬戶管理=admin，admin 恆可執行一切；演示賬號 demo / reviewer_demo / approver_demo / finance_demo（口令均 demo）；`tests/test_roles.py` 為正負用例；審計綁服務端身份，前端自填 actor 已忽略，停用即時生效 |
-| 安全與私隱 | **已加固**：提示注入偵測（只標記不執行）、不可信資料隔離包裝、模型輸出審查、scrypt+HMAC 加密密鑰環（`SecretVault`，明文不落盤）、私隱出口閘門；端點 `/api/security/scan`、`/api/security/review-output`、`/api/security/vault/status`；CLI `scripts/vault_cli.py` |
+| 身份與角色 | **P0-06/07 已落地**：所有 /api 需 HTTP Basic；角色矩陣 operator/reviewer/approver/finance/admin；Basic 短時快取降低 scrypt 成本、停用即清空；遠端模式不建立/自動停用弱口令演示賬號；評分身份綁定登入帳號（`reviewer_id`），衝突以結構化 ID 比對；`decline_allowed` 已修復「缺材料不能否決」；前端移除寫死 demo 提示 |
+| 安全與私隱 | **已加固**：注入偵測前移至送模型之前（規則＋啟發式，**僅提示不保證攔截**）、隔離包裝、輸出審查；`output_gate.py` 讓 `ensure_safe_output()` 真正接入 Web/CLI 評審包、Excel 與通知；去識別化不再 `restore()` 回明文，正則加 Luhn/語境降低誤傷；密鑰環明文不進 `os.environ`；端點 `/api/security/*`；CLI `scripts/vault_cli.py keys` |
 | 字形標準化 | **15 地區**配置；OpenCC `s2hk`/`s2twp`/`t2s` 逐字精確標準化 + 香港標準字白名單；`detect_script` 支援 hant/hans/ja/ko/latin；端點 `/api/script/audit`、`/api/script/regions` |
 | 實測缺陷 | **4 個已修**（截止時間/評委人數/歷史包導出/列表分頁，見 §4） |
 | 合併狀態 | **全部併入 `main` @ `a843542`**；本地與遠端 tree 一致（`90fa966`）、工作區乾淨、CI 全綠；`v1.0.0`/`v1.1.0` tag 保留，v1.2.0 已移除，版本號現為 v1.1.0 |
@@ -154,6 +154,10 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 ## 7a. 部署與網絡防護（最新疊代）
 
 `src/kkg/serve.py` 集中管理部署配置：本機預設只聽 loopback；設 `GRANTFLOW_HOST=0.0.0.0` 才接受遠端。`app.py` 的中間件加入每地址滑動窗口限流、連續認證失敗臨時封鎖、Host/Origin/CIDR 約束、請求大小上限與安全響應頭；`output/security.log` 只記事件、地址、路徑與狀態碼，不含憑據。健康端點 `/healthz`、`/readyz` 供容器與負載均衡器使用。`scripts/start.sh` 提供 local/remote/docker/test 四種模式；Fly.io 與 Render 範例在 `deploy/`。反向代理必須設 `GRANTFLOW_TRUST_PROXY=true`，並把 Host、X-Forwarded-* 正確轉發；直接對外則保持 `false`。詳情見 `docs/deployment.md`。
+
+**外部審查回饋整改（P1）**：`output_gate.py` 已把「輸出閘門」從文件變成實際呼叫點（Web/CLI 包、Excel、通知）；注入掃描移到模型呼叫之前，並明確標示「規則＋啟發式、不保證攔截」；`ReviewScore.reviewer_id` 與 `Finding.subject_id` 落實身份綁定與結構化衝突比對；`pipeline.intake()` 不再 `restore()` 明文；私隱正則加入 Luhn 與身份/護照語境；Basic 憑據短時快取但仍即時撤銷；密鑰環不再注入環境變數；遠端模式停用演示弱口令；`decline_allowed` 修復「缺材料不能否決」；基準報告標示 Mock 口徑限制。回歸測試見 `tests/test_audit_fixes.py`。
+
+**仍未完成（對接真實資料前硬門檻）**：機構級 OIDC/SSO、環境分離、備份演練、獨立審計保存、真實模型性能基線與 WAF/平台防護。
 
 ---
 

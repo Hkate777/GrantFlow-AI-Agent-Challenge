@@ -29,7 +29,8 @@ from kkg import __version__
 from kkg.auth import AccountDisabled, AuthError, AuthStore, Forbidden, Identity
 from kkg.guard import review_output, scan_prompt_injection
 from kkg.llm import MockLLM, get_llm
-from kkg.models import Finding, FindingType, Milestone, ReviewScore, Severity
+from kkg.models import Finding, FindingType, Milestone, ReviewScore, Severity, identity_key
+from kkg.output_gate import gate_bundle, gate_directory, gate_text
 from kkg.pipeline import Pipeline, load_applications
 from kkg.privacy import scan_sensitive
 from kkg.program import Program
@@ -54,6 +55,7 @@ class Revision(Input):
 
 class ScoreRow(Input):
     reviewer: str = Field(max_length=120)
+    reviewer_id: str | None = Field(default=None, max_length=120)
     criteria: dict[str, Any]
     comment: str = Field(default="", max_length=4000)
 
@@ -220,10 +222,16 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
     database = database or os.environ.get("GRANTFLOW_DB") or BASE / "output/grantflow.sqlite3"
     runtime = runtime or RuntimeConfig.from_env()
     auth_store = AuthStore(Path(database).parent / "auth.sqlite3")
-    created = auth_store.ensure_defaults(os.environ.get("GRANTFLOW_BOOTSTRAP_PASSWORD"))
+    created = auth_store.ensure_defaults(os.environ.get("GRANTFLOW_BOOTSTRAP_PASSWORD"),
+                                         demo=not runtime.remote_access)
+    if runtime.remote_access:
+        # 即使沿用了本機演示資料庫，遠端部署也一律停用弱口令角色賬號。
+        for demo_account in ("demo", "reviewer_demo", "approver_demo", "finance_demo"):
+            auth_store.set_disabled(demo_account, disabled=True)
     if "admin" in created:
         print(f"[auth] 初始管理員：admin / {created['admin']}（請立即記錄並更換口令）")
-        print(f"[auth] 演示賬號：demo / {created['demo']}（正式環境請停用）")
+        if "demo" in created:
+            print("[auth] 本機演示賬號已建立（口令 demo）；遠端部署會自動停用。")
     workspace = Workspace(CaseStore(database), _programs(configs or BASE / "configs"))
     api = FastAPI(title="GrantFlow", version=__version__, docs_url=None, redoc_url=None,
                   dependencies=[Depends(_auth_guard)])
@@ -370,8 +378,17 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
 
     @api.put("/api/cases/{case_id}/scores")
     def score(case_id: str, data: ScoresInput, identity: Identity = Depends(_require_role(*ROLE_SCORES))):
-        return workspace.score(case_id, data.revision, [ReviewScore(**row.model_dump()) for row in data.scores],
-                               identity.display_name)
+        # 遠端部署：評審身份必須綁定服務端登入帳號，忽略前端自填姓名/ID，
+        # 同一帳號不得重複提交多份評分。本機演示模式保留舊行為以便重現示範。
+        remote = api.state.runtime.remote_access
+        rows: list[ReviewScore] = []
+        for row in data.scores:
+            payload = row.model_dump()
+            payload["reviewer"] = identity.display_name if remote else row.reviewer
+            payload["reviewer_id"] = (identity.account_id if remote else
+                                      (row.reviewer_id or identity_key(row.reviewer)))
+            rows.append(ReviewScore(**payload))
+        return workspace.score(case_id, data.revision, rows, identity.display_name)
 
     @api.post("/api/cases/{case_id}/resolution")
     def resolve(case_id: str, data: ResolutionInput, identity: Identity = Depends(_require_role(*ROLE_RESOLVE))):
@@ -400,17 +417,32 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
             program = Program.from_snapshot(snapshot)
         else:
             program = workspace.program(app.program)
+        findings = [Finding(**{**row, "finding_type": FindingType(row["finding_type"]),
+                               "severity": Severity(row["severity"])}) for row in detail["findings"]]
+        # 對外物料強制經輸出閘門：先去識別化，再對每個檔案套用 ensure_safe_output。
+        bundle = gate_bundle(app, detail["extracted"], findings,
+                             notice=detail["assessment"].get("notice") or "")
         with TemporaryDirectory(prefix="grantflow-pack-") as output:
-            findings = [Finding(**{**row, "finding_type": FindingType(row["finding_type"]),
-                                   "severity": Severity(row["severity"])}) for row in detail["findings"]]
-            folder = reviewer_pack(app, program, detail["extracted"], findings, output)
+            folder = reviewer_pack(bundle["application"], program, bundle["extracted"],
+                                   bundle["findings"], output)
+            gate_hits = gate_directory(folder, bundle["redactor"])
+            review_json, json_hits = gate_text(json.dumps(detail["assessment"], ensure_ascii=False, indent=2),
+                                               bundle["redactor"])
+            findings_json, finding_hits = gate_text(json.dumps([asdict(f) for f in bundle["findings"]],
+                                                               ensure_ascii=False, indent=2),
+                                                    bundle["redactor"])
             buffer = io.BytesIO()
             with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as archive:
                 for path in sorted(folder.glob("*.md")):
                     archive.write(path, path.name)
-                archive.writestr("review.json", json.dumps(detail["assessment"], ensure_ascii=False, indent=2))
-                if detail["assessment"]["notice"]:
-                    archive.writestr("result.md", detail["assessment"]["notice"])
+                archive.writestr("review.json", review_json)
+                archive.writestr("findings.json", findings_json)
+                if bundle["notice"]:
+                    archive.writestr("result.md", bundle["notice"])
+                if gate_hits or json_hits or finding_hits or bundle["gate_hits"]:
+                    archive.writestr("gate_report.json", json.dumps(
+                        {"files": gate_hits, "review": json_hits, "findings": finding_hits,
+                         "notice": bundle["gate_hits"]}, ensure_ascii=False, indent=2))
         return Response(buffer.getvalue(), media_type="application/zip",
                         headers={"Content-Disposition": 'attachment; filename="reviewer-pack.zip"'})
 
@@ -426,7 +458,9 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
                    for item in current["periodic_reports"]]
         payments = [Disbursement(item["name"], item["due"], item["amount"], item["paid_amount"], item["paid_at"])
                     for item in current["disbursements"]]
-        return management_report(app.app_id, app.title, milestones, reports, disbursements=payments)
+        report_text = management_report(app.app_id, app.title, milestones, reports, disbursements=payments)
+        safe_report, _ = gate_text(report_text)
+        return safe_report
 
     # Keep the existing read-only demo API available to earlier integrations.
     regions = Region.load_all(BASE / "configs" / "regions")

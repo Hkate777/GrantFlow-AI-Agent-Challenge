@@ -14,7 +14,7 @@ import unicodedata
 from datetime import date
 from typing import Any
 
-from .models import Application, Finding, FindingType, Severity
+from .models import Application, Finding, FindingType, Severity, identity_key
 from .money import parse_hkd
 from .program import Program
 from .region import Region, detect_script
@@ -226,9 +226,11 @@ def _conflict_findings(app: Application, prog: Program) -> list[Finding]:
         evidence = [(source, word) for source, text in normalized for word in keywords if _contains(text, word)]
         if evidence:
             source, keyword = evidence[0]
+            # subject_id 為結構化身份鍵（帳號 ID 優先），不再依賴姓名字符串比對。
             findings.append(Finding(FindingType.CONFLICT, Severity.CRITICAL,
                                     f"潛在利益衝突：評審員「{reviewer}」與「{keyword}」有關，請安排迴避核查。",
-                                    detail=reviewer, source=source, needs_human=True))
+                                    detail=reviewer, source=source, needs_human=True,
+                                    subject_id=identity_key(reviewer)))
     return findings
 
 

@@ -67,6 +67,10 @@ def main() -> None:
     lines = [
         "# GrantFlow基準測試報告",
         "",
+        "> **口徑聲明**：本報告以離線 MockLLM 產生，抽取路徑與真實模型不同；"
+        "耗時與檢出率只作為本機回歸基線，**不得當作真實模型性能或人工節省證明**對外引用。"
+        "對外數據須另行以指定模型、真實申請樣本與人工標註對照重跑。",
+        "",
         f"- 測試日期：{time.strftime('%Y-%m-%d %H:%M:%S')}",
         f"- 測試環境：Python {sys.version.split()[0]}，離線MockLLM（可重現）",
         f"- 測試規模：{len(apps)}份申請 × {sum(len(a.docs) for a in apps)}個附件，每份重複{repeats}次",

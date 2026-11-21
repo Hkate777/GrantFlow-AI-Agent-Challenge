@@ -214,7 +214,7 @@ async function api(path, options = {}) {
   const detail = data?.detail;
   const description = Array.isArray(detail) ? detail.map((item) => item.msg || valueText(item)).join("。") : detail;
   const message = response.status === 401
-    ? "請先登入：賬號 demo、口令 demo（正式環境請聯絡管理員開設賬號）。"
+    ? "請先登入：使用管理員發出的賬號與口令；忘記憑據請聯絡系統管理員。"
     : response.status === 409
     ? "資料版本已有更新。請重新載入個案，再提交變更。"
     : description || (response.ok ? "伺服器傳回了無法讀取的資料。" : `操作失敗（${response.status}）。請重試。`);

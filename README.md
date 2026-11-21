@@ -15,7 +15,7 @@ GrantFlow面向大學、科技園、創投機構及創新創業支援單位，�
 - **評審資料包**：自動生成標準化申請摘要、一頁式項目簡介、評審核對清單（Reviewer Pack）
 - **評審彙總**：按維度權重計算加權總分，自動識別評分分歧並觸發複議建議，生成評審進度草稿與後續待辦
 - **人工簽發工作台**：個案狀態機自動推導「待補件、資格待核、待評分、評分待更正、待複議、評審人數不足、待人工覆核、待簽發」；補件、評分、複議記錄、簽發各有版本號防衝突；截止時間以服務端收件時間為準，評委人數不足或規則快照不符會擋住簽發
-- **帳號與權限**：本機帳號、HTTP Basic 登入、scrypt 加鹽口令；停用帳號即時撤銷全部工作階段；工作台操作綁定服務端操作員身份；角色權限矩陣（operator 收件、reviewer 評分、approver 簽發、finance 台帳、admin 全部）落實職責分離
+- **帳號與權限**：本機帳號、HTTP Basic 登入、scrypt 加鹽口令；已驗證 Basic 憑據有 5 分鐘内存快取避免每請求重算 scrypt，停用帳號時即時清空並撤銷全部工作階段；工作台操作綁定服務端操作員身份；角色權限矩陣（operator 收件、reviewer 評分、approver 簽發、finance 台帳、admin 全部）落實職責分離。遠端部署（非本機監聽）**不建立弱口令演示賬號**，即使沿用本機資料庫也會自動停用；評分身份以登入帳號綁定，利益衝突以結構化 ID 比對而非姓名字符串
 - **項目追蹤**：里程碑、資助發放、定期報告跟蹤，撥款合計不得超出核准額度，逾期/臨期自動預警，輸出管理報告
 - **全程可審計**：每個Agent動作寫入審計日誌，關鍵節點標記為需人工複核
 - **多地區審查**：內置15個地區（中國香港、中國台灣、中國內地、新加坡、美國、英國、澳洲、加拿大、日本、韓國、阿聯酋、沙特、馬來西亞、泰國、埃及），Agent按地區載入語言字形、當地法規、貨幣格式及評審慣例；法規依據真實法律（UK GDPR、Privacy Act 1988、PIPEDA、PDPL、Law 151/2020 等）
@@ -79,6 +79,10 @@ Pipeline 追蹤階段傳入 `region.timezone`；Web/CLI 處理含時區標記的
 | 隔離包裝 | `guard.py` | `harden_prompt()` 在 system 附加最高優先隔離宣告；`wrap_untrusted()` 以明確分隔符包裹申請內容，防止閉合注入 |
 | 出口審查 | `guard.py` | `review_output()` 檢查模型輸出有否洩漏系統提示、含命令痕跡、可疑外傳連結、明文憑據或非預期欄位；可疑輸出整批不採用 |
 
+> **能力邊界（如實説明）**：注入偵測是規則＋結構化啟發式提示，只標記、不保證攔截所有注入；它提高人工覆核可見度，不是語意分類器。真實模型分支才會呼叫模型，MockLLM 不發出請求，但**掃描與對外輸出閘門照樣執行**——兩者覆蓋範圍與模型無關。
+
+對外物料統一經 `output_gate.py`：Web 評審包、CLI 評審包、Excel 總表與結果通知都實際呼叫 `ensure_safe_output()`（不是文件上的口號），即使上游拼接出幻覺敏感值也會被佔位符取代；評審包內另附 `gate_report.json` 記錄命中類型與次數。抽取結果不再 `restore()` 回明文，交叉驗證全程使用去識別化視圖，避免敏感值沿 Finding 流入對外物料。私隱正則加入 Luhn 校驗與身份/護照語境要求，時間戳、項目編號與普通證件號不再被誤殺。
+
 私隱加固（`privacy.py`）：
 
 - **去識別化**：送模型前遮蔽電郵、電話、香港身份證、內地身份證/手機號、護照、銀行卡、IP、合約編號及 API 憑據（`sk-`/`AIza`/`AWS`/JWT/GitHub token），原始值不落盤、不進日誌；
@@ -90,6 +94,7 @@ Pipeline 追蹤階段傳入 `region.timezone`；Web/CLI 處理含時區標記的
 - scrypt 由主口令派生金鑰，HMAC-SHA256 串流加密 + encrypt-then-MAC 認證，篡改即拒絶讀取；
 - 檔案權限 0600，清單只顯示遮蔽值（前 4 後 2），絶不回傳明文；
 - 主口令由環境變數 `GRANTFLOW_VAULT_PASS` 提供，不明文寫入任何檔案；
+- **明文不進程環境**：`apply_vault_to_env()` 已停止把憑據寫入 `os.environ`（該做法仍可從 `/proc/<pid>/environ` 讀到明文）；LLM 客戶端直接向密鑰環取值，明文只短暫存在記憶體；
 - 正式部署應改用硬件密鑰或雲端 KMS，此處為機構內部單機演示級。
 
 ```bash
@@ -97,9 +102,10 @@ export GRANTFLOW_VAULT_PASS='你的主口令'
 python scripts/vault_cli.py set OPENAI_API_KEY sk-...     # 加密存放
 python scripts/vault_cli.py list                           # 只顯示遮蔽值
 python scripts/vault_cli.py verify                         # 驗證口令與完整性
+python scripts/vault_cli.py keys                           # 列出可用憑據名稱，不注入環境
 ```
 
-Web 工作台提供 `POST /api/security/scan`（注入+敏感值偵測）、`POST /api/security/review-output`（輸出審查）、`GET /api/security/vault/status`（密鑰環狀態，僅遮蔽值），均受認證保護。測試見 `tests/test_security.py`（19 項）。
+Web 工作台提供 `POST /api/security/scan`（注入+敏感值偵測）、`POST /api/security/review-output`（輸出審查）、`GET /api/security/vault/status`（密鑰環狀態，僅遮蔽值），均受認證保護。測試見 `tests/test_security.py`（19 項）與 `tests/test_audit_fixes.py`（11 項審查回歸）。
 
 
 ## 快速開始
@@ -248,7 +254,8 @@ flowchart LR
 │   ├── llm.py                  # 可插拔模型（Mock/OpenAI/Claude/Gemini，優雅降級）
 │   ├── privacy.py              # 私隱去識別化 + 輸出閘門 + 隨機 salt 防關聯
 │   ├── guard.py                # 安全護欄：提示注入偵測 + 隔離包裝 + 輸出審查
-│   ├── secrets.py              # 加密密鑰環：scrypt + HMAC 認證加密，明文不落盤
+│   ├── output_gate.py          # 對外物料統一輸出閘門（實際呼叫 ensure_safe_output）
+│   ├── secrets.py              # 加密密鑰環：scrypt + HMAC 認證加密，明文不落盤、不進進程環境
 │   ├── script.py               # 地區字形標準化引擎（逐處定位 + 白名單）
 │   ├── program.py              # 計劃規則模型（含快照重建）
 │   ├── models.py               # 數據模型 + 審計日誌
@@ -269,7 +276,7 @@ flowchart LR
 │   ├── export_summary.py       # 匯出評審總覽 Excel
 │   ├── vault_cli.py            # 加密密鑰環管理（set/get/list/delete/verify）
 │   └── pitch_demo.py           # 一鍵生成決賽演示全套物料：output/pitch/
-├── tests/                      # 159 項端到端測試（含 19 項安全、7 項時區、11 項部署防護）
+├── tests/                      # 170 項端到端測試（含 19 項安全、11 項部署防護、11 項審查回歸）
 ├── TEAM_HANDOFF.md             # 團隊交接説明（現況/歷史線/設計決策/分工）
 └── docs/                       # 架構説明 / 部署指南 / 版本説明 / 評審映射
 ```
@@ -283,6 +290,8 @@ python scripts/pitch_demo.py    # 一鍵生成全套決賽物料（含 8 分鐘�
 ```
 
 `pitch_demo.py` 會把評審資料包、結果通知、待辦、管理報告、彙總Excel、基準報告及審計日誌集中輸出到 `output/pitch/`，適合決賽現場直接展示。
+
+> **基準口徑**：`benchmark.py` 以離線 MockLLM 產生，抽取路徑與真實模型不同；報告內已標明其耗時與檢出率只可作本機回歸基線，**不得當作真實模型性能或人工節省證明**對外引用。對外數據須以指定模型、真實標本與人工標註對照重跑。
 
 ## Demo數據説明（故意內置異常，驗證Agent檢出能力）
 
@@ -301,8 +310,16 @@ python scripts/pitch_demo.py    # 一鍵生成全套決賽物料（含 8 分鐘�
 - MockLLM保證無外部調用時結果確定一致；真實模型 temperature 固定0.2
 - 接入真實模型時數據已先脫敏，降低敏感資訊外洩至第三方的風險
 - **不被惡意引導**：申請內容視為不可信輸入，提示注入只標記不執行；模型輸出經安全審查才採用，可疑即轉人工覆核
-- **憑據不落盤**：模型 API Key 存放於加密密鑰環（scrypt + HMAC 認證），明文不進檔案、日誌或清單
+- **憑據不落盤、不進環境**：模型 API Key 存放於加密密鑰環（scrypt + HMAC 認證），明文不進檔案、日誌、清單或 `os.environ`
 - **網絡縱深防禦**：按地址限流、連續認證失敗自動封鎖、Host/Origin/CIDR 約束、安全響應頭與無敏感資料的安全日誌；異地部署須配合 HTTPS 與可信反向代理設定
+
+### 已知限制（如實披露）
+
+- 注入偵測是規則與啟發式提示，不是語意分類器：可標記可見線索，但**不保證攔截所有注入**，也不取代人工覆核。
+- 本機 Basic 仍可用於演示；正式對外必須走遠端模式（HTTPS + 反向代理 + 管理員發出的賬號），演示賬號在遠端模式會被停用。
+- OIDC/SSO、機構級授權、環境分離、備份演練與獨立審計保存仍屬對接真實資料前的硬門檻，尚未完成。
+- 密鑰環是單機演示級；正式機構應改硬件密鑰或雲端 KMS 並配合輪替與存取審計。
+- 平台的防火牆／DDoS 防護與依賴更新不在本項目內；不可用本項目取代 WAF。
 
 ## 路線圖
 

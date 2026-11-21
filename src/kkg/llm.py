@@ -9,7 +9,7 @@
 支持的 --llm 取值見 get_llm()；any_openai兼容端點用 openai。
 
 憑據來源優先順序：進程環境變數 > 加密密鑰環（SecretVault）。
-密鑰環由「用戶安全精靈」在需要時解鎖並注入，明文不落盤、不進日誌。
+模型客戶端在需要時直接向密鑰環取值，明文不落盤、不進日誌，也不寫入進程環境。
 """
 from __future__ import annotations
 
@@ -143,14 +143,14 @@ class GeminiLLM(_HTTPLLM):
             raise RuntimeError("未設置GEMINI_API_KEY，無法使用Gemini。")
         super().__init__("gemini", model, key)
         self.url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
-                    f"{model}:generateContent?key={key}")
+                    f"{model}:generateContent")
 
     def complete(self, system: str, user: str) -> str:
         data = self._post(self.url, {
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": user}]}],
             "generationConfig": {"temperature": 0.2},
-        }, {})
+        }, {"x-goog-api-key": self.key})
         return "".join(p.get("text", "") for c in data.get("candidates", [])
                        for p in c.get("content", {}).get("parts", []))
 

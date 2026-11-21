@@ -44,37 +44,34 @@ class Pipeline:
     def intake(self, app: Application) -> tuple[dict, list[Finding]]:
         self.audit.log("intake", "start", f"{app.app_id} {app.title}")
 
-        # 私隱防護：送LLM前先去識別化，原始敏感值不離開本機；
-        # 抽取結果再於本機還原，讓後續交叉驗證邏輯不受影響。
-        if self.redactor:
-            safe_app = self.redactor.safe_view(app)
-            extracted = extract_fields(safe_app, self.llm)
-            extracted = {k: (self.redactor.restore(v) if isinstance(v, str) else v)
-                         for k, v in extracted.items()}
-            self.audit.log("privacy", "redacted", self.redactor.report.summary())
-        else:
-            extracted = extract_fields(app, self.llm)
+        # 注入偵測前移：必須在任何模型調用之前完成，規則式訊號只作提示、
+        # 絶不執行其內容；即使使用 MockLLM（不發出模型請求）也照樣掃描。
+        blob = "\n".join([app.title, app.applicant,
+                          *(str(v) for v in app.fields.values()),
+                          *(d.text for d in app.docs if d.text)])
+        security_signals: list = []
+        if blob.strip():
+            security_signals = scan_prompt_injection(blob, locator=app.app_id)
+            self.audit.log("guard", "pre_model_scan",
+                           f"{app.app_id} · {len(security_signals)}處 · 規則式提示，不保證攔截")
+        findings = injection_findings(security_signals, app_id=app.app_id)
 
+        # 私隱防護：送LLM前先去識別化，抽取與交叉驗證全程只見佔位符；
+        # 不再把抽取結果 restore() 回明文，避免敏感值沿 Finding 流入評審包。
+        source = self.redactor.safe_view(app) if self.redactor else app
+        extracted = extract_fields(source, self.llm)
+        if self.redactor:
+            self.audit.log("privacy", "redacted", self.redactor.report.summary())
         extracted["_program_name"] = self.prog.name
         extracted["_criteria_hint"] = " / ".join(c.name for c in self.prog.criteria)
         self.audit.log("extract", "fields", f"keys={list(extracted)}")
 
-        findings = check_completeness(app, self.prog)
-        findings += cross_verify(app, extracted)
-
-        # 安全掃描：對申請標題、字段與附件正文做提示注入偵測。
-        # 哨測到的可疑內容只標記為需人工覆核的 Finding，絶不執行其內容。
-        security_signals: list = []
-        blob = "\n".join([app.title, app.applicant,
-                          *(str(v) for v in app.fields.values()),
-                          *(d.text for d in app.docs if d.text)])
-        if blob.strip():
-            security_signals = scan_prompt_injection(blob, locator=app.app_id)
-            findings += injection_findings(security_signals, app_id=app.app_id)
-            if security_signals:
-                self.audit.log("guard", "injection_detected",
-                               f"{app.app_id} · {len(security_signals)}處 · "
-                               f"{[s.category for s in security_signals]}")
+        findings += check_completeness(app, self.prog)
+        findings += cross_verify(source, extracted)
+        if security_signals:
+            self.audit.log("guard", "injection_detected",
+                           f"{app.app_id} · {len(security_signals)}處 · "
+                           f"{[s.category for s in security_signals]}")
         if self.region:
             from .check import check_region, normalize_for_region
             from . import script as script_std
@@ -102,22 +99,19 @@ class Pipeline:
     # ---------- 階段 3：生成評審資料包 ----------
     def build_packs(self, apps: list[Application], extracts: dict[str, dict],
                     all_findings: dict[str, list[Finding]], out_dir: str | Path) -> dict[str, str]:
-        from dataclasses import replace
+        from .output_gate import gate_bundle, gate_directory
         from .summarize import reviewer_pack
 
         paths = {}
         for a in apps:
-            # 對外評審資料包一律用去識別化視圖，確保郵箱/電話/身份證等不退洩
-            view = self.redactor.safe_view(a) if self.redactor else a
-            safe_findings = ([replace(f, message=self.redactor.redact(f.message),
-                                      detail=self.redactor.redact(f.detail))
-                              for f in all_findings.get(a.app_id, [])]
-                             if self.redactor else all_findings.get(a.app_id, []))
-            safe_extract = ({k: (self.redactor.redact(v) if isinstance(v, str) else v)
-                             for k, v in extracts[a.app_id].items()}
-                            if self.redactor else extracts[a.app_id])
-            pack = reviewer_pack(view, self.prog, safe_extract,
-                                 safe_findings, out_dir, llm=self.llm)
+            # 對外評審資料包一律經輸出閘門：去識別化視圖 + 逐檔 ensure_safe_output。
+            bundle = gate_bundle(a, extracts[a.app_id], all_findings.get(a.app_id, []),
+                                 redactor=self.redactor)
+            pack = reviewer_pack(bundle["application"], self.prog, bundle["extracted"],
+                                 bundle["findings"], out_dir, llm=self.llm)
+            hits = gate_directory(pack, bundle["redactor"])
+            if hits:
+                self.audit.log("output_gate", "redacted", f"{a.app_id} · {hits}")
             paths[a.app_id] = str(pack)
         self.audit.log("summarize", "packs", f"n={len(paths)}")
         return paths
