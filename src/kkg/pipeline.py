@@ -132,7 +132,7 @@ class Pipeline:
                      scores: list[ReviewScore] | None = None) -> dict:
         """為單一申請生成可追溯物料：依據卡、合規分級、確定性評分與評測。
 
-        全部為規則式、零 LLM、零新數字；决策日志由呼叫端持久化（Web 用
+        全部為規則式、零 LLM、零新數字；決策日誌由呼叫端持久化（Web 用
         DecisionJournal，CLI 寫入 SQLite）。回傳 dict 便於序列化與展示。
         """
         from .compliance import classify

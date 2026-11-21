@@ -102,7 +102,7 @@ def test_confirmation_date_uses_region_timezone():
 
 
 def test_project_status_infers_tz_from_records():
-    """未显式傳 tz 時，project_status 從記錄物件自帶的 tz 推斷當地今天。"""
+    """未顯式傳 tz 時，project_status 從記錄物件自帶的 tz 推斷當地今天。"""
     from kkg.models import Milestone
     from kkg.track import PeriodicReport, project_status
 

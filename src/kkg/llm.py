@@ -19,7 +19,7 @@ from typing import Any, Protocol
 
 
 def _key(env_name: str) -> str:
-    """讀取憑據：環境變數優先，其次加密密鑰環（仅在密钥环已可用时）。"""
+    """讀取憑據：環境變數優先，其次加密密鑰環（僅在密鑰環已可用時）。"""
     value = os.environ.get(env_name, "")
     if value:
         return value

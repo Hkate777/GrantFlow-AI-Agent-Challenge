@@ -128,7 +128,7 @@ def check_milestones(ms: list[Milestone], today: date | None = None,
 
 def _resolve_tz(tz: str, periodic_reports: Iterable[object] | None,
                 disbursements: Iterable[object] | None) -> str:
-    """解析時區：显式傳入優先；否則從記錄物件自帶的 tz 欄位推斷。
+    """解析時區：顯式傳入優先；否則從記錄物件自帶的 tz 欄位推斷。
 
     舊資料（無 tz 欄位）回傳空字串，由 today_in_zone 降級到機器本地日期，
     保持向後相容。
