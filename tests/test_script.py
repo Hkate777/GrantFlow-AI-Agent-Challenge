@@ -7,6 +7,14 @@ from fastapi.testclient import TestClient
 import app
 from kkg import script as sc
 
+# opencc 為可選依賴：未安裝時 script.py 降級為「不轉換、只回報」。
+# 依賴實際轉換的測試須跳過，避免把降級行為誤報為回歸；
+# Web 端點則改為雙路徑斷言（見 test_script_audit_web_endpoint）。
+requires_opencc = pytest.mark.skipif(
+    sc.opencc is None,
+    reason="opencc 為可選依賴，未安裝時字形轉換降級為不轉換",
+)
+
 
 def test_supported_regions():
     assert sc.supported_regions() == ["CN", "HK", "SG", "TW"]
@@ -16,6 +24,7 @@ def test_supported_regions():
     assert sc.target_label("XX") == ""
 
 
+@requires_opencc
 def test_hk_normalizes_simplified_to_hong_kong_traditional():
     # 簡體「网络信息」在香港標準下應為「網絡信息」
     out = sc.normalize_text("申请预算和网络信息", "HK")
@@ -25,6 +34,7 @@ def test_hk_normalizes_simplified_to_hong_kong_traditional():
     assert any(e.original == "网络" and e.suggested == "網絡" for e in report.edits)
 
 
+@requires_opencc
 def test_hk_protects_official_hong_kong_spellings():
     # OpenCC s2hk 會誤轉這些香港標準字，必須被白名單保護
     text = "說明用戶，資料已脫敏，離群值已標示，資訊完整。"
@@ -34,6 +44,7 @@ def test_hk_protects_official_hong_kong_spellings():
     assert report.summary().endswith("無需修正")
 
 
+@requires_opencc
 def test_tw_uses_taiwan_terms():
     out = sc.normalize_text("软件和网络，資訊質量", "TW")
     assert out == "軟體和網路，資訊質量"
@@ -47,6 +58,7 @@ def test_tw_uses_taiwan_terms():
     assert "软" in joined and "网络" in joined
 
 
+@requires_opencc
 def test_cn_converts_traditional_to_simplified():
     out = sc.normalize_text("軟件網絡資訊", "CN")
     assert out == "软件网络资讯"
@@ -54,6 +66,7 @@ def test_cn_converts_traditional_to_simplified():
     assert report.change_count >= 1
 
 
+@requires_opencc
 def test_mixed_script_is_detected_with_locations():
     report = sc.audit_text("第一行：軟件\n第二行：网络\n第三行：資訊", "HK")
     assert report.mixed_scripts is True
@@ -78,6 +91,7 @@ def test_unsupported_region_is_noop():
     assert report.change_count == 0
 
 
+@requires_opencc
 def test_report_as_dict_shape():
     report = sc.audit_text("网络信息", "HK")
     data = report.as_dict()
@@ -105,10 +119,15 @@ def test_script_audit_web_endpoint(tmp_path):
     resp = client.post("/api/script/audit", json={"text": "軟件說明用戶，网络信息。", "region": "HK"})
     assert resp.status_code == 200
     data = resp.json()
-    assert data["change_count"] == 1
-    assert data["edits"][0]["original"] == "网络"
-    assert data["edits"][0]["suggested"] == "網絡"
-    assert data["normalized_text"] == "軟件說明用戶，網絡信息。"
+    if data["available"]:
+        assert data["change_count"] == 1
+        assert data["edits"][0]["original"] == "网络"
+        assert data["edits"][0]["suggested"] == "網絡"
+        assert data["normalized_text"] == "軟件說明用戶，網絡信息。"
+    else:
+        # 可選依賴缺失：如實回報不可用，不假裝字形正確
+        assert data["change_count"] == 0
+        assert data["normalized_text"] == "軟件說明用戶，网络信息。"
 
 
 def test_script_audit_requires_auth(tmp_path):

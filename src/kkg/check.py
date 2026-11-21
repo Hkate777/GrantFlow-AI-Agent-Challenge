@@ -72,6 +72,9 @@ def check_region(app: Application, region: Region) -> list[Finding]:
     script = detect_script(corpus or app.title)
     if script != "latin":
         # 優先按地區代碼做精確標準化（HK/TW/CN/SG）；其餘地區退回粗略字形判定。
+        # opencc 為可選依賴：缺失時精確審計不可用，退回粗略繁簡判定，
+        # 讓字形檢查「降級」而非「消失」；有 opencc 時行為完全不變。
+        precise_checked = False
         if region.code in script_std.supported_regions():
             audit = script_std.audit_text(corpus or app.title, region.code)
             if audit.change_count:
@@ -83,7 +86,10 @@ def check_region(app: Application, region: Region) -> list[Finding]:
                         for e in audit.edits[:10]
                     ),
                     source="region.script", needs_human=False))
-        elif script != region.script:
+                precise_checked = True
+            elif audit.available:
+                precise_checked = True  # opencc 可用且確認無差異，無須再粗略判定
+        if not precise_checked and script != region.script:
             findings.append(Finding(
                 FindingType.FORMAT, Severity.WARNING,
                 f"地區「{region.name}」期望{_SCRIPT_LABEL.get(region.script, region.script)}字形，"
