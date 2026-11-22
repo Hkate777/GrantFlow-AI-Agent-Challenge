@@ -83,6 +83,7 @@ class Workspace:
             "received_at": _now(), "revision": 1, "receipt": digest,
             "rule_version": program.rule_version, "extracted": self._prepare(app, program),
             "program_snapshot": asdict(program),
+            "assignments": [],  # P1-04：評審指派（非空列表即工作流個案；舊個案無此鍵，走純評分計數）
             "scores": [asdict(score) for score in scores or []], "resolution": None, "decision": None,
             "project": {"milestones": [], "periodic_reports": [], "disbursements": []}, "audit": [],
         }
@@ -142,7 +143,8 @@ class Workspace:
         basis = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
         reviewed = bool(case["resolution"] and case["resolution"]["basis"] == basis)
         scores = [ReviewScore(**score) for score in case["scores"]]
-        result = assess(scores, program, findings, pass_threshold=program.pass_threshold, reviewed=reviewed)
+        result = assess(scores, program, findings, pass_threshold=program.pass_threshold, reviewed=reviewed,
+                        assignments=case.get("assignments"))
         result["todos"] = followup_todos(app.app_id, result)
         return result, rows, basis
 
@@ -168,6 +170,7 @@ class Workspace:
                              program.rule_version if program else case["rule_version"]),
             "documents": [{key: doc[key] for key in ("name", "doc_type", "error")} for doc in app["docs"]],
             "findings": findings, "extracted": case["extracted"], "scores": case["scores"],
+            "assignments": case.get("assignments", []),
             "assessment": assessment, "resolution": resolution, "decision": decision,
             "project": project_status(*_project(case["project"])), "audit": case["audit"],
         }
@@ -320,6 +323,92 @@ class Workspace:
             case.update(scores=[asdict(score) for score in scores], resolution=None)
             names = "、".join(score.reviewer for score in scores) or "未有評分"
             _event(case, "scores_saved", actor, f"更新評審員：{names}。")
+
+        return self._edit(case_id, revision, apply)
+
+    # ---------- P1-04：評審指派、利益申報與身份綁定的獨立評分 ----------
+
+    MAX_ASSIGNMENTS = 20  # 單一個案的指派人數上限（含已迴避）
+
+    @staticmethod
+    def _assignment(case: dict, reviewer_id: str) -> dict:
+        for row in case.get("assignments") or []:
+            if row["reviewer_id"] == reviewer_id:
+                return row
+        raise ValueError("評審未被指派此個案。")
+
+    def assign(self, case_id: str, revision: int, actor: str, reviewer_id: str, display_name: str) -> dict:
+        """經辦把 reviewer 賬號指派到個案（賬號存在性/角色/啓用狀態由 API 層對 auth 校驗）。"""
+        actor = _actor(actor)
+        if not isinstance(reviewer_id, str) or not reviewer_id.strip() or len(reviewer_id) > 120:
+            raise ValueError("請提供有效的評審賬號。")
+        reviewer_id = reviewer_id.strip().casefold()
+        if not isinstance(display_name, str) or not display_name.strip() or len(display_name) > 120:
+            raise ValueError("請提供有效的評審姓名。")
+
+        def apply(case, _batch):
+            assignments = case.setdefault("assignments", [])
+            if any(row["reviewer_id"] == reviewer_id for row in assignments):
+                raise ValueError("此評審已被指派該個案。")
+            if len(assignments) >= self.MAX_ASSIGNMENTS:
+                raise ValueError(f"單一個案最多指派 {self.MAX_ASSIGNMENTS} 名評審。")
+            assignments.append({"reviewer_id": reviewer_id, "display_name": display_name.strip(),
+                                "assigned_at": _now(), "assigned_by": actor,
+                                "status": "assigned", "note": ""})
+            _event(case, "reviewer_assigned", actor, f"指派評審：{display_name.strip()}（{reviewer_id}）。")
+
+        return self._edit(case_id, revision, apply)
+
+    def declare(self, case_id: str, revision: int, reviewer_id: str, display_name: str,
+                has_conflict: bool, note: str = "") -> dict:
+        """被指派評審申報利益衝突；申報有衝突即迴避（已有評分一併移除並記錄審計）。"""
+        reviewer_id = _actor(reviewer_id)
+        note = (note or "").strip()
+        if len(note) > 2000:
+            raise ValueError("申報說明長度不超過 2,000 個字元。")
+
+        def apply(case, _batch):
+            assignment = self._assignment(case, reviewer_id)
+            assignment["note"] = note
+            if not has_conflict:
+                assignment["status"] = "declared"
+                _event(case, "conflict_declared", display_name, "申報無利益衝突，可提交評分。")
+                return
+            assignment["status"] = "recused"
+            before = len(case["scores"])
+            case["scores"] = [row for row in case["scores"] if row.get("reviewer_id") != reviewer_id
+                              and row["reviewer"] != display_name]
+            case["resolution"] = None
+            detail = "申報利益衝突，迴避本個案評審。"
+            removed = before - len(case["scores"])
+            if removed:
+                detail += f"其原有評分（{removed} 行）已移除。"
+            _event(case, "conflict_declared", display_name, detail)
+
+        return self._edit(case_id, revision, apply)
+
+    def score_own(self, case_id: str, revision: int, reviewer_id: str, display_name: str,
+                  criteria: dict, comment: str = "") -> dict:
+        """評審本人提交評分：服務端強制評委名=賬號顯示名，按 reviewer_id 覆寫既有行（upsert）。"""
+        reviewer_id = _actor(reviewer_id)
+
+        def apply(case, _batch):
+            assignment = self._assignment(case, reviewer_id)
+            if assignment["status"] == "recused":
+                raise ValueError("已申報利益衝突迴避，不可提交評分。")
+            if assignment["status"] == "assigned":
+                raise ValueError("請先完成利益申報，再提交評分。")
+            program = self.program(case["application"]["program"])
+            bound = ReviewScore(display_name, criteria,
+                                comment if isinstance(comment, str) else "", reviewer_id=reviewer_id)
+            errors = aggregate([bound], program)["validation_errors"]
+            if errors:
+                raise ValueError(" ".join(errors))
+            case["scores"] = [row for row in case["scores"] if row.get("reviewer_id") != reviewer_id]
+            case["scores"].append(asdict(bound))
+            case["resolution"] = None
+            assignment["status"] = "submitted"
+            _event(case, "scores_saved", display_name, "評審提交本人評分（身份綁定）。")
 
         return self._edit(case_id, revision, apply)
 

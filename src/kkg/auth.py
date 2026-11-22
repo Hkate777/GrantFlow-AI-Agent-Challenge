@@ -150,18 +150,27 @@ class AuthStore:
             self._ensure_schema(connection)
             (count,) = connection.execute("SELECT COUNT(*) FROM accounts").fetchone()
         if count:
+            if demo:
+                self._ensure_reviewer2()   # 舊本機安裝補建第二評審（P1-04，冪等）
             return created
         admin_password = bootstrap_password or secrets.token_urlsafe(12)
         self.create_account("admin", "系統管理員", admin_password, role="admin")
         if demo:
             self.create_account("demo", "本機演示員", "demo", role="operator")
             self.create_account("reviewer_demo", "評審員（演示）", "demo", role="reviewer")
+            self.create_account("reviewer2_demo", "評審乙（演示）", "demo", role="reviewer")
             self.create_account("approver_demo", "主管（演示）", "demo", role="approver")
             self.create_account("finance_demo", "財務（演示）", "demo", role="finance")
-            created.update({"demo": "demo", "reviewer_demo": "demo",
+            created.update({"demo": "demo", "reviewer_demo": "demo", "reviewer2_demo": "demo",
                             "approver_demo": "demo", "finance_demo": "demo"})
         created["admin"] = admin_password
         return created
+
+    def _ensure_reviewer2(self) -> None:
+        """已存在的本機安裝補建第二個評審演示賬號（口令 demo）；已存在或遠端部署則不動。"""
+        if any(account["id"] == "reviewer2_demo" for account in self.list_accounts()):
+            return
+        self.create_account("reviewer2_demo", "評審乙（演示）", "demo", role="reviewer")
 
     # ---------- 認證 ----------
 

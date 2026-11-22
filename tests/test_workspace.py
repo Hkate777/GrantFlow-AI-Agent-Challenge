@@ -91,7 +91,8 @@ def test_supplement_invalidates_scores_and_stale_finals_fail(tmp_path):
         assert added.status_code == 200, added.text
         new_case = added.json()
         assert new_case["scores"] == []
-        assert new_case["assessment"]["status"] == "pending_scores"
+        # P1-04：工作流個案補件後無評分且未指派 → 首要狀態為待指派評審（與待評分互斥）。
+        assert new_case["assessment"]["status"] == "pending_assignment"
         assert _save_scores(client, scored).status_code == 409
 
 

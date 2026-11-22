@@ -19,6 +19,7 @@ const icons = {
 };
 
 const statuses = {
+  pending_assignment: ["待指派評審", "warning"],
   needs_materials: ["待補件", "warning"],
   needs_compliance: ["待合規核查", "error"],
   needs_review: ["待人工覆核", "warning"],
@@ -58,14 +59,16 @@ const severityLabels = {
 const docLabels = { proposal: "申請書", budget: "預算表", cv: "團隊簡歷", endorsement: "推薦信", demo: "示範影片" };
 const auditLabels = {
   intake: "收件", imported: "匯入申請", demo_import: "匯入示範個案", materials_updated: "更新申請資料",
-  scores_updated: "更新評分", resolution_recorded: "登記人工覆核", decision_recorded: "登記批核結果", project_updated: "更新項目進度",
+  scores_updated: "更新評分", scores_saved: "更新評分", resolution_recorded: "登記人工覆核",
+  decision_recorded: "登記批核結果", decision_signed: "簽發批核結果", project_updated: "更新項目進度",
+  reviewer_assigned: "指派評審", conflict_declared: "利益申報",
 };
 
 const state = {
-  programs: [], cases: [], listReady: false, demoBusy: false,
+  programs: [], cases: [], listReady: false, demoBusy: false, me: null,
   route: null, activeCase: null, caseRequest: 0, registryRequest: 0,
   queue: "all", programFilter: "", statusFilter: "", query: "", rulesOpen: false,
-  tab: "overview", editor: null, keepNotice: false,
+  tab: "overview", editor: null, keepNotice: false, conflictHasConflict: false,
 };
 
 const content = document.querySelector("#workspace");
@@ -518,7 +521,8 @@ function overviewView(record, program) {
     ["收件時間（香港）", timeText(record.received_at)], ["收件渠道", channelText(record.channel)],
     ["規則版本", record.rule_version], ...fields.map(([key, value]) => [fieldLabels.get(key) || key, value]),
   ];
-  const materialAction = !isFinal(record) ? button("補件或修訂", () => openEditor("overview", "materials")) : null;
+  const materialAction = !isFinal(record) && (!state.me || ["operator", "admin"].includes(state.me.role))
+    ? button("補件或修訂", () => openEditor("overview", "materials")) : null;
   return el("div", "split",
     el("div", "stack", findingsPanel(record), evidencePanel(record, program)),
     el("div", "stack", panel("申請內容", pairs(basic), materialAction), filesPanel(record)),
@@ -534,16 +538,137 @@ function scoreGrid(record, program) {
   return table(columns, scores.map((score) => [valueText(score.reviewer), ...names.map((name) => numberText(score.criteria?.[name]))]));
 }
 
+// P1-04 角色感知：服務端為硬閘，前端只做對應的界面顯隱；身份取得失敗時保持原有界面。
+const roleIs = (...roles) => Boolean(state.me) && roles.includes(state.me.role);
+const isReviewer = () => roleIs("reviewer");
+const canManageReview = () => !state.me || !["reviewer", "finance"].includes(state.me.role);
+const canManageAssign = () => !state.me || ["operator", "admin"].includes(state.me.role);
+
+const assignmentStatusLabels = { assigned: "已指派", declared: "已申報無衝突", submitted: "已評分", recused: "已迴避" };
+
+function assignmentStatusBadge(status) {
+  const tone = status === "recused" ? "error" : status === "submitted" ? "success" : "";
+  return badge(assignmentStatusLabels[status] || status, tone);
+}
+
+function assignmentRows(record) {
+  const rows = (record.assignments || []).map((row) => [
+    valueText(row.display_name), assignmentStatusBadge(row.status),
+    timeText(row.assigned_at), valueText(row.note),
+  ]);
+  return rows.length ? table([["評審", ""], ["狀態", ""], ["指派時間（香港）", "number"], ["申報說明", ""]], rows)
+    : el("p", "muted", "尚未指派評審。");
+}
+
+function assignmentsPanel(record) {
+  const action = !isFinal(record) && canManageAssign() && state.editor !== "assignments"
+    ? button("指派評審", () => openEditor("review", "assignments")) : null;
+  return panel("評審指派與利益申報", assignmentRows(record), action);
+}
+
+async function assignForm(record) {
+  let reviewers;
+  try {
+    reviewers = await api("/api/reviewers");
+  } catch (error) {
+    return panel("指派評審", messageBox(error.message, "error"), button("返回", closeEditor));
+  }
+  const choices = reviewers.map((row) => [row.reviewer_id, `${row.display_name}（${row.reviewer_id}）`]);
+  if (!choices.length) return panel("指派評審", el("p", "muted", "系統內暫無可指派的評審賬號。"), button("返回", closeEditor));
+  const reviewer = selectControl(choices, "");
+  return saveForm("指派評審", [field("評審賬號", reviewer, "僅列出啓用中的評審角色賬號；獲指派評審須先申報利益衝突，再各自提交評分。", true)], {
+    inCase: true, label: "確認指派", success: "已指派評審。",
+    submit: () => jsonRequest(`${casePath(record.id)}/assignments`, "POST",
+      { revision: record.revision, reviewer_id: reviewer.value }),
+  });
+}
+
+function myScoreForm(record, program) {
+  const criteria = program?.criteria || [];
+  if (!criteria.length) return panel("我的評分", el("p", "muted", "未有此計劃的評分準則。請檢查計劃配置。"), button("返回", closeEditor));
+  const mine = (record.scores || []).find((row) => row.reviewer_id === state.me?.account_id) || {};
+  const controls = criteria.map((criterion) => [criterion, input("number", mine.criteria?.[criterion.name], {
+    required: true, min: 0, max: criterion.max_score, step: "any",
+  })]);
+  const comment = input("textarea", mine.comment);
+  return saveForm("我的評分", [
+    el("p", "hint", "評分以你的登入賬號簽署，每位評審獨立提交；提交後可在此修改，再次提交即覆寫。"),
+    ...controls.map(([criterion, control]) => field(`${criterion.name}（滿分 ${criterion.max_score}）`, control)),
+    field("評審意見（選填）", comment, "", true),
+  ], {
+    inCase: true, label: "提交評分", success: "已提交本人評分。",
+    submit: () => jsonRequest(`${casePath(record.id)}/scores`, "POST", {
+      revision: record.revision,
+      criteria: Object.fromEntries(controls.map(([criterion, control]) => [criterion.name, control.valueAsNumber])),
+      comment: comment.value.trim(),
+    }),
+  });
+}
+
+function conflictForm(record, hasConflict) {
+  const note = input("textarea", "");
+  const items = hasConflict
+    ? [field("申報說明（選填）", note, "可記錄衝突性質，例如與申請團隊的關係。確認後你會被迴避，已交評分將被移除。", true)]
+    : [el("p", "hint", "確認與此個案無利益衝突後，即可填寫並提交評分。")];
+  return saveForm(hasConflict ? "申報利益衝突（迴避）" : "申報無利益衝突", items, {
+    inCase: true, label: "確認申報", success: "已記錄利益申報。",
+    submit: () => jsonRequest(`${casePath(record.id)}/conflict`, "POST",
+      { revision: record.revision, has_conflict: hasConflict, note: note.value.trim() }),
+  });
+}
+
+function reviewerPanel(record, program) {
+  const final = isFinal(record);
+  const assignment = (record.assignments || []).find((row) => row.reviewer_id === state.me?.account_id);
+  if (!assignment) {
+    return panel("我的評審任務", el("p", "muted", final ? "個案已完結。" : "你尚未被指派此個案；如需參與評審，請聯絡經辦安排指派。"));
+  }
+  const items = [["狀態", assignmentStatusBadge(assignment.status)]];
+  if (assignment.note) items.push(["申報說明", assignment.note]);
+  const actions = el("div", "actions");
+  if (!final && assignment.status !== "recused") {
+    if (assignment.status === "assigned") {
+      actions.append(button("申報無利益衝突", () => { state.conflictHasConflict = false; openEditor("review", "conflict"); }, "primary"));
+      actions.append(button("申報利益衝突（迴避）", () => { state.conflictHasConflict = true; openEditor("review", "conflict"); }));
+    } else {
+      actions.append(button(record.scores?.length ? "修改我的評分" : "填寫我的評分",
+        () => openEditor("review", "my-score"), "primary"));
+      actions.append(button("申報利益衝突（撤回評分）", () => { state.conflictHasConflict = true; openEditor("review", "conflict"); }));
+    }
+  }
+  const myRows = (record.scores || []).filter((row) => row.reviewer_id === state.me?.account_id);
+  const scoreSummary = myRows.length ? scoreGrid({ scores: myRows }, program)
+    : el("p", "muted", assignment.status === "assigned" ? "完成利益申報後即可填寫評分。" : "尚未提交評分。");
+  return panel("我的評審任務", el("div", "", pairs(items, "assessment-totals"), scoreSummary), actions);
+}
+
+function reviewerNotes(assessment) {
+  const notes = [["待辦事項", assessment.todos]].filter(([, items]) => items?.length)
+    .map(([label, items]) => el("div", "review-note", el("h3", "", label), list(items)));
+  return notes.length ? el("div", "", ...notes) : null;
+}
+
 function reviewView(record, program) {
   const assessment = assessmentFor(record);
   const final = isFinal(record);
+  let editor;
+  if (state.editor === "scores") editor = scoresForm(record, program);
+  if (state.editor === "resolution") editor = resolutionForm(record);
+  if (state.editor === "decision") editor = decisionForm(record);
+  if (state.editor === "assignments") editor = assignForm(record);
+  if (state.editor === "my-score") editor = myScoreForm(record, program);
+  if (state.editor === "conflict") editor = conflictForm(record, state.conflictHasConflict);
+  if (isReviewer()) {
+    // P1-04 盲評：服務端已隱去他人評分與彙總；評審界面聚焦自身任務與申報。
+    return el("div", "stack", editor, reviewerPanel(record, program), assignmentsPanel(record), reviewerNotes(assessment));
+  }
   const actionGroup = el("div", "actions");
-  if (!final && state.editor !== "scores") actionGroup.append(button(record.scores?.length ? "編輯評分" : "填寫評分", () => openEditor("review", "scores")));
+  if (!final && canManageReview() && state.editor !== "scores") actionGroup.append(button(record.scores?.length ? "編輯評分" : "填寫評分", () => openEditor("review", "scores")));
   const canResolve = (assessment.holds || []).some((hold) => ["needs_review", "pending_deliberation"].includes(hold))
     || (!record.resolution && (record.findings || []).some((finding) => finding.needs_human));
-  if (!final && canResolve && state.editor !== "resolution") actionGroup.append(button("登記人工覆核", () => openEditor("review", "resolution")));
+  if (!final && canResolve && canManageReview() && state.editor !== "resolution") actionGroup.append(button("登記人工覆核", () => openEditor("review", "resolution")));
   const canDecide = assessment.approval_allowed || assessment.decline_allowed;
-  if (!final && canDecide && state.editor !== "decision") actionGroup.append(button("作出批核", () => openEditor("review", "decision"), "primary"));
+  if (!final && canDecide && canManageReview() && state.editor !== "decision") actionGroup.append(button("作出批核", () => openEditor("review", "decision"), "primary"));
   const totals = [["加權總分（滿分 100）", numberText(assessment.weighted_total)], ["評分差距", numberText(assessment.spread)]];
   const notes = [
     ["待辦事項", assessment.todos], ["評分提示", assessment.flags], ["評分問題", assessment.validation_errors],
@@ -556,11 +681,7 @@ function reviewView(record, program) {
     ["結果", statusLabel(record.decision.outcome)], ["登記人", record.decision.actor], ["理由", record.decision.reason],
   ])) : null;
   const resultNotice = assessment.notice ? panel("結果通知稿", el("p", "block-text", assessment.notice)) : null;
-  let editor;
-  if (state.editor === "scores") editor = scoresForm(record, program);
-  if (state.editor === "resolution") editor = resolutionForm(record);
-  if (state.editor === "decision") editor = decisionForm(record);
-  return el("div", "stack", editor, summary, panel("個別評分", scoreGrid(record, program)), resolution, decision, resultNotice);
+  return el("div", "stack", editor, summary, panel("個別評分", scoreGrid(record, program)), assignmentsPanel(record), resolution, decision, resultNotice);
 }
 
 const projectStatusLabels = {
@@ -1125,5 +1246,18 @@ for (const node of document.querySelectorAll("[data-icon]")) node.append(icon(no
 document.querySelector(".skip-link").addEventListener("click", (event) => { event.preventDefault(); content.focus(); });
 demoButton.addEventListener("click", importDemo);
 window.addEventListener("hashchange", () => navigate());
-navigate(false);
-if (!state.registryLoading) reloadRegistry();
+
+async function loadMe() {
+  // P1-04：取得登入角色以顯隱界面；取得失敗（未登入/舊後端）時保持原有界面，服務端仍為硬閘。
+  try {
+    state.me = await api("/api/auth/me");
+    demoButton.hidden = Boolean(state.me) && !["operator", "admin"].includes(state.me.role);
+  } catch {
+    state.me = null;
+  }
+}
+
+loadMe().finally(() => {
+  navigate(false);
+  if (!state.registryLoading) reloadRegistry();
+});

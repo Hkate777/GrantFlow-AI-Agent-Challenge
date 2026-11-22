@@ -65,6 +65,21 @@ class ScoresInput(Revision):
     actor: str = "本機操作員"
 
 
+class OwnScoreInput(Revision):
+    """P1-04：評審本人單行評分——評委名以服務端身份為準，不接受前端指定。"""
+    criteria: dict[str, Any]
+    comment: str = Field(default="", max_length=4000)
+
+
+class AssignInput(Revision):
+    reviewer_id: str = Field(max_length=120)
+
+
+class ConflictInput(Revision):
+    has_conflict: bool
+    note: str = Field(default="", max_length=2000)
+
+
 class ResolutionInput(Revision):
     actor: str
     reason: str
@@ -209,13 +224,25 @@ def _require_role(*roles: str):
     return dependency
 
 
-# P0-07 角色矩陣（職責分離）：經辦=收件/補件/複議記錄；評委=評分；主管=簽發；財務=台帳。
+# P0-07 角色矩陣（職責分離）：經辦=收件/補件/複議/指派評審；評委=評分；主管=簽發；財務=台帳。
 ROLE_SUBMIT = ("operator",)
 ROLE_MATERIALS = ("operator",)
 ROLE_SCORES = ("reviewer",)
 ROLE_RESOLVE = ("operator",)
+ROLE_ASSIGN = ("operator",)   # P1-04：評審指派（經辦）
 ROLE_SIGN = ("approver",)
 ROLE_PROJECT = ("finance",)
+
+
+def _blind(detail: dict, identity: Identity) -> dict:
+    """P1-04 盲評投影：評審角色在簽發前只見自己的評分與狀態
+    （他人評分、加權總分、分歧標記均不可見；簽發後個案全量可見）。"""
+    if identity.role != "reviewer" or detail.get("decision"):
+        return detail
+    mine = [row for row in detail["scores"] if row.get("reviewer_id") == identity.account_id]
+    assessment = {key: detail["assessment"][key] for key in ("status", "holds", "todos")
+                  if key in detail["assessment"]}
+    return {**detail, "scores": mine, "assessment": assessment}
 
 
 def create_app(database: str | Path | None = None, configs: Path | None = None,
@@ -234,6 +261,15 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
         if "demo" in created:
             print("[auth] 本機演示賬號已建立（口令 demo）；遠端部署會自動停用。")
     workspace = Workspace(CaseStore(database), _programs(configs or BASE / "configs"))
+
+    def _reviewer_account(reviewer_id: str) -> dict:
+        """P1-04：指派前對 auth 校驗——賬號須存在、為 reviewer 角色且啓用中。"""
+        found = [row for row in auth_store.list_accounts()
+                 if row["id"] == (reviewer_id or "").strip().casefold()]
+        if not found or found[0]["role"] != "reviewer" or found[0]["disabled"]:
+            raise ValueError("找不到可指派的評審賬號（須為啓用中的 reviewer 賬號）。")
+        return found[0]
+
     api = FastAPI(title="GrantFlow", version=__version__, docs_url=None, redoc_url=None,
                   dependencies=[Depends(_auth_guard)])
     api.add_middleware(TrustedHostMiddleware, allowed_hosts=list(runtime.allowed_hosts))
@@ -337,14 +373,20 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
         return [{**asdict(program), "rule_version": program.rule_version} for program in workspace.programs.values()]
 
     @api.get("/api/cases")
-    def cases(limit: int | None = None, offset: int = 0):
+    def cases(limit: int | None = None, offset: int = 0,
+              identity: Identity = Depends(_require_identity)):
         # 不帶分頁參數 → 舊形狀（純陣列，相容既有前端）；帶 limit → 分頁對象。
         result = workspace.list(limit=limit, offset=offset)
+        if identity.role == "reviewer":
+            # 盲評：列表對評審隱去加權總分（他人彙總不可見）。
+            items = [{key: value for key, value in item.items() if key != "weighted_total"}
+                     for item in result["items"]]
+            result = {**result, "items": items}
         return result["items"] if limit is None else result
 
     @api.get("/api/cases/{case_id}")
-    def case(case_id: str):
-        return workspace.get(case_id)[0]
+    def case(case_id: str, identity: Identity = Depends(_require_identity)):
+        return _blind(workspace.get(case_id)[0], identity)
 
     @api.post("/api/demo")
     def seed(identity: Identity = Depends(_require_role(*ROLE_SUBMIT))):
@@ -381,6 +423,7 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
     def score(case_id: str, data: ScoresInput, identity: Identity = Depends(_require_role(*ROLE_SCORES))):
         # 遠端部署：評審身份必須綁定服務端登入帳號，忽略前端自填姓名/ID，
         # 同一帳號不得重複提交多份評分。本機演示模式保留舊行為以便重現示範。
+        # P1-04：本端點為批量通道（本機演示/管理員更正用）；評審工作流請走下方 POST 身份綁定端點。
         remote = api.state.runtime.remote_access
         rows: list[ReviewScore] = []
         for row in data.scores:
@@ -390,6 +433,33 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
                                       (row.reviewer_id or identity_key(row.reviewer)))
             rows.append(ReviewScore(**payload))
         return workspace.score(case_id, data.revision, rows, identity.display_name)
+
+    @api.post("/api/cases/{case_id}/scores")
+    def score_own(case_id: str, data: OwnScoreInput,
+                  identity: Identity = Depends(_require_role(*ROLE_SCORES))):
+        # P1-04：評審本人獨立提交——服務端強制評委名/賬號綁定，按 reviewer_id upsert；
+        # 須先獲指派並完成利益申報，申報衝突迴避者拒收。
+        return _blind(workspace.score_own(case_id, data.revision, identity.account_id,
+                                          identity.display_name, data.criteria, data.comment), identity)
+
+    @api.post("/api/cases/{case_id}/assignments")
+    def assign(case_id: str, data: AssignInput, identity: Identity = Depends(_require_role(*ROLE_ASSIGN))):
+        account = _reviewer_account(data.reviewer_id)
+        return workspace.assign(case_id, data.revision, identity.display_name,
+                                account["id"], account["display_name"])
+
+    @api.post("/api/cases/{case_id}/conflict")
+    def declare_conflict(case_id: str, data: ConflictInput,
+                         identity: Identity = Depends(_require_role(*ROLE_SCORES))):
+        return _blind(workspace.declare(case_id, data.revision, identity.account_id,
+                                        identity.display_name, data.has_conflict, data.note), identity)
+
+    @api.get("/api/reviewers")
+    def reviewers(identity: Identity = Depends(_require_role(*ROLE_ASSIGN))):
+        """可指派的評審賬號（僅回傳賬號與顯示名；經辦指派面板用）。"""
+        return [{"reviewer_id": row["id"], "display_name": row["display_name"]}
+                for row in auth_store.list_accounts()
+                if row["role"] == "reviewer" and not row["disabled"]]
 
     @api.post("/api/cases/{case_id}/resolution")
     def resolve(case_id: str, data: ResolutionInput, identity: Identity = Depends(_require_role(*ROLE_RESOLVE))):
@@ -407,6 +477,7 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
     @api.get("/api/cases/{case_id}/pack")
     def pack(case_id: str, identity: Identity = Depends(_require_identity)):
         detail, app = workspace.get(case_id)
+        detail = _blind(detail, identity)  # P1-04：評審導出的評審包同樣盲評
         # 計劃定義優先序：簽發時快照（版本鎖定）→ 收件時快照 → 當前配置。
         # 避免同名計劃改版後出現「舊結果配新維度」的歷史包。
         decision = detail["decision"] or {}

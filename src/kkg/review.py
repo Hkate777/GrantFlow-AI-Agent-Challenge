@@ -17,6 +17,7 @@ from .program import Program
 
 
 STATUS_LABELS = {
+    "pending_assignment": "待指派評審",
     "needs_materials": "待補件",
     "needs_compliance": "資格待核",
     "needs_review": "待人工覆核",
@@ -134,7 +135,14 @@ def aggregate(scores: list[ReviewScore], prog: Program) -> dict:
 
 
 def assess(scores: list[ReviewScore], program: Program, findings: list[Finding],
-           *, pass_threshold: float, reviewed: bool = False) -> dict:
+           *, pass_threshold: float, reviewed: bool = False,
+           assignments: list[dict] | None = None) -> dict:
+    """彙總並推導個案狀態。
+
+    assignments（P1-04）：個案的評審指派記錄；None = 舊個案/非工作流（不做指派檢查），
+    list = 工作流個案——有效評分與未迴避指派人數均不足 min_reviewers 時產生
+    pending_assignment hold，插在待評分之前（指派是評分的前置條件）。
+    """
     result = aggregate(scores, program)
     serious = {finding.finding_type for finding in findings
                if finding.severity in {Severity.ERROR, Severity.CRITICAL}}
@@ -146,6 +154,8 @@ def assess(scores: list[ReviewScore], program: Program, findings: list[Finding],
     scored_by = {identity_key(score.reviewer_id) if score.reviewer_id else identity_key(score.reviewer)
                  for score in scores if isinstance(score.reviewer, str)}
     active_conflicts = sorted(conflicted & scored_by)
+    # P1-04：工作流個案的活躍（未迴避）指派；與分數人數共同決定是否已可進入評分。
+    active_assignments = [row for row in (assignments or []) if row.get("status") != "recused"]
     holds = []
     if result["flags"] and not reviewed:
         holds.append("pending_deliberation")
@@ -155,8 +165,13 @@ def assess(scores: list[ReviewScore], program: Program, findings: list[Finding],
         holds.append("needs_compliance")
     # 無有效評分時，首要狀態是待評分/待更正——排在人工覆核之前，
     # 否則僅含提示級發現的新案會被誤標為待人工覆核。
+    # P1-04：待指派評審插在待評分之前——指派是評分的前置條件，
+    # 但排在材料/資格/複議之後（個案內容問題比評審安排更優先顯示）。
     if result["validation_errors"]:
         holds.append("invalid_scores")
+    elif assignments is not None and len(scores) < program.min_reviewers \
+            and len(active_assignments) < program.min_reviewers:
+        holds.append("pending_assignment")
     elif not scores:
         holds.append("pending_scores")
     elif len(scores) < program.min_reviewers:
@@ -166,8 +181,8 @@ def assess(scores: list[ReviewScore], program: Program, findings: list[Finding],
 
     total = result["weighted_total"]
     # 否決代表人工裁定「不通過」：缺材料/資格問題可在完成複議記錄後否決；
-    # 評分本身無效或人數不足時仍需先更正，不能跳過評審程序。
-    procedural_holds = {"invalid_scores", "insufficient_reviews", "pending_scores"}
+    # 評分本身無效、人數不足或評審未指派齊全時仍需先完成評審程序，不能跳過。
+    procedural_holds = {"invalid_scores", "insufficient_reviews", "pending_scores", "pending_assignment"}
     decline_allowed = (not holds) or (
         reviewed and not active_conflicts and not procedural_holds.intersection(holds))
     return {**result, "holds": holds, "status": holds[0] if holds else "awaiting_decision",

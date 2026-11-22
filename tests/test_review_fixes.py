@@ -109,7 +109,8 @@ def test_min_reviewers_blocks_signoff(tmp_path):
         "revision": case["revision"], "scores": _scores_from(criteria, count=1)},
         headers=ROLE_AUTH["reviewer"])
     holds = client.get(f"/api/cases/{case['id']}").json()["assessment"]["holds"]
-    assert "insufficient_reviews" in holds, holds
+    # P1-04：工作流個案未指派評審時，首要狀態為待指派（與人數不足互斥）；簽發同樣被擋。
+    assert holds == ["pending_assignment"], holds
     sign = client.post(f"/api/cases/{case['id']}/decision", json={
         "revision": case["revision"] + 1, "actor": "主管", "reason": "嘗試簽發", "outcome": "approved"},
         headers=ROLE_AUTH["approver"])
