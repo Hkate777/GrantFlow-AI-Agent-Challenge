@@ -53,6 +53,8 @@ class RuntimeConfig:
     allowed_networks: tuple[str, ...] = ()
     public_origins: tuple[str, ...] = ()
     https_only: bool = False
+    # 單機也可明確要求身份綁定（不依賴 remote_access 的隱式條件）。
+    enforce_identity: bool = False
 
     @classmethod
     def from_env(cls) -> "RuntimeConfig":
@@ -70,7 +72,13 @@ class RuntimeConfig:
             allowed_networks=networks,
             public_origins=_env_list("GRANTFLOW_PUBLIC_ORIGINS"),
             https_only=_env_bool("GRANTFLOW_HTTPS_ONLY"),
+            enforce_identity=_env_bool("GRANTFLOW_ENFORCE_IDENTITY"),
         )
+
+    @property
+    def strict_identity(self) -> bool:
+        """是否需要完整身份綁定：遠端部署，或管理員明確要求（單機亦可）。"""
+        return self.remote_access or self.enforce_identity
 
     @property
     def remote_access(self) -> bool:

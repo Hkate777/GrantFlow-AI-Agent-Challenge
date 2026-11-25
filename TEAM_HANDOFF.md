@@ -1,44 +1,44 @@
 # GrantFlow · 團隊交接說明
 
-> 更新日期：2026-11-21 ｜ **主線 `main`**（所有整合、安全、字形、角色矩陣、可追溯模組、Web 可追溯分頁與語義注入偵測均已併入；本地與遠端一致、CI 全綠；確切 HEAD 以 `git rev-parse HEAD` 及遠端 `main` 分支為準，不在本文件寫死 SHA 以免自我過期）
+> 更新日期：2026-11-21 ｜ 主線 `main`（所有整合、安全、字形、角色矩陣、可追溯模組、Web 可追溯分頁與語義注入偵測均已併入；本地與遠端一致、CI 全綠；確切 HEAD 以 `git rev-parse HEAD` 及遠端 `main` 分支為準，不在本文件寫死 SHA 以免自我過期）
 > 倉庫：https://github.com/Hkate777/GrantFlow-AI-Agent-Challenge （舊名 KK_Garden，GitHub 自動重定向）
 > 本地檢出：`C:\Users\25345\Documents\New project\KK_Garden`
-> 本文件面向共同開發的隊友：專案現況、歷史線說明、如何接手、協作規範、風險與待辦。
+> 本文件供共同開發的隊友查閱：專案現況、歷史線說明、如何接手、協作規範、風險與待辦。
 > 相關文檔：[前次交接](<C:/Users/25345/Documents/New project/GrantFlow_交接文档.md>) · [全面審評與改進清單](<C:/Users/25345/Documents/New project/GrantFlow_全面审评与改进清单.md>) · [參賽手冊](<C:/Users/25345/Desktop/个人资料/《「智賦香江」AI智能體應用大賽 參賽手冊》.pdf>)
 
-> **最新進度（2026-11-21）**：`main` 已由上而下串接——字形標準化引擎、安全護欄與加密密鑰環、權限角色矩陣 P0-07（隊友提交）、追蹤去 emoji 與日韓字形糾正、地區時區支援（當地今天判定）。提交歷史已重寫以 corrected 作者身份（`KK_ZHONG <hellokate757@gmail.com>`），並已加入五項可追溯與質量閉環模組、把它們接入 Web 工作台「可追溯」分頁與語義注入偵測。版本號維持 **v1.1.0**（v1.2.0 已移除，安全/角色/時區改動不單獨發版，依約不急於升版）。
+> 最新進度（2026-11-21）：`main` 已由上而下串接：字形標準化引擎、安全護欄與加密密鑰環、權限角色矩陣 P0-07（隊友提交）、追蹤去 emoji 與日韓字形糾正、地區時區支援（當地今天判定）。提交歷史已重寫以 corrected 作者身份（`KK_ZHONG <hellokate757@gmail.com>`），並已加入五項可追溯與質量閉環模組、把它們接入 Web 工作台「可追溯」分頁與語義注入偵測。版本號維持 v1.1.0（v1.2.0 已移除，安全/角色/時區改動不單獨發版，依約不急於升版）。
 >
-> **最新進度（2026-11-22，P1-04 評審獨立性工作流）**：個案級**評審指派**（經辦）→ **利益衝突申報**（有衝突即迴避並移除其評分，審計留痕）→ **身份綁定的獨立評分**（`POST /scores` 服務端強制評委名=登入賬號、按 `reviewer_id` upsert）→ **盲評投影**（評審簽發前只見自己的評分與狀態，簽發後解除）→ 新狀態 **`pending_assignment`（待指派評審）**；批量評分 PUT 保留為本機演示/管理員更正通道（遠端模式本就強制綁定）。新增演示賬號 `reviewer2_demo`（評審乙，僅本機演示模式，舊安裝冪等補建）。前端按角色顯隱（我的評審任務/指派面板/申報表單），服務端始終為硬閘。移植說明：本輪在隊友重寫後的 `main` 之上落實，沿用其 `reviewer_id` 命名與遠端/演示雙模式設計。
+> 最新進度（2026-11-22，P1-04 評審獨立性工作流）：個案級評審指派（經辦）→ 利益衝突申報（有衝突即迴避並移除其評分，審計留痕）→ 身份綁定的獨立評分（`POST /scores` 服務端強制評委名=登入賬號、按 `reviewer_id` upsert）→ 盲評投影（評審簽發前看不到申請人身份與他人評分，簽發後解除）→ 新狀態 `pending_assignment`（待指派評審）；批量評分 PUT 保留為本機演示/管理員更正通道（遠端模式本就強制綁定）。新增演示賬號 `reviewer2_demo`（評審乙，僅本機演示模式，舊安裝冪等補建）。前端按角色顯隱（我的評審任務/指派面板/申報表單），服務端始終為硬閘。移植說明：本輪在隊友重寫後的 `main` 之上落實，沿用其 `reviewer_id` 命名與遠端/演示雙模式設計。
 
 ---
 
-## 1. 專案與現況（一句話）
+## 1. 專案與現況
 
-GrantFlow 對應「智賦香江」場景 ⑯「申請評審與項目管理流程自動化」：收件（網頁/`.eml`）→ 證據級抽取與跨源核對 → 規則校驗 → 評審彙總 → **人工簽發** → 資助後台帳；全程審計。
+GrantFlow 對應「智賦香江」場景 ⑯「申請評審與項目管理流程自動化」：收件（網頁/`.eml`）→ 證據級抽取與跨源核對 → 規則校驗 → 評審彙總 → 人工簽發 → 資助後台帳；全程審計。
 
-**目前真實狀態**（以本節為準）：
+目前狀態（以本節為準）：
 
 | 項目 | 現況 |
 |---|---|
-| 測試 | **204 passed + 8 skipped**（本機缺 opencc 部分；`python -m pytest tests -q`；唯一失敗為 vault 檔案權限位的 Windows 環境差異，與改動無關。含 P1-04 新增 `tests/test_assignments.py` 7 項：指派/申報/獨立評分/盲評/迴避替補閉環） |
+| 測試 | 最新結果以 `python -m pytest tests -q` 為準（本機可能缺 opencc；`python -m pytest tests -q`；唯一失敗為 vault 檔案權限位的 Windows 環境差異，與改動無關。含 P1-04 的 `tests/test_assignments.py` 7 項：指派/申報/獨立評分/盲評/迴避替補閉環） |
 | 語言檢查 | 通過（OpenCC `s2hk` 警告模式；`data/demo` 舊簡體輸入已豁免） |
 | Web 冒煙 | `/`、`app.js`、`styles.css`、`/api/program`、`/api/regions`、`/api/cases` 全 200 |
-| 兩線整合 | **已完成**：Web 工作台線 + 多地區/隱私/導出線合併（見 §2） |
+| 兩線整合 | 已完成：Web 工作台線 + 多地區/隱私/導出線合併（見 §2） |
 | 乾淨安裝 | 隔離 venv 只裝 `requirements.txt` → 全綠（依賴已鎖定相容區間並補 `httpx`/`httpx2`/`python-multipart`，CI 綠燈） |
-| 身份與角色 | **P0-06/07 已落地**：所有 /api 需 HTTP Basic；角色矩陣 operator/reviewer/approver/finance/admin（**經辦另含評審指派**）；Basic 短時快取降低 scrypt 成本、停用即清空；遠端模式不建立/自動停用弱口令演示賬號；評分身份綁定登入帳號（`reviewer_id`），衝突以結構化 ID 比對；`decline_allowed` 已修復「缺材料不能否決」；前端移除寫死 demo 提示 |
-| 評審工作流 | **P1-04 已落地**：個案級評審指派（`POST /assignments`，operator，經 auth 校驗 reviewer 角色）→ 利益申報（`POST /conflict`；申報有衝突即迴避、移除其評分、須經辦替補）→ 獨立評分（`POST /scores`，身份綁定 upsert，未指派/未申報/已迴避一律拒收）→ 盲評投影（`_blind`：reviewer 角色簽發前只見本人評分與 status/holds/todos，列表隱總分、評審包 review.json 同樣盲評，簽發後解除）；狀態機新增 `pending_assignment`（插在待評分之前、材料/資格/複議之後，並列入程序性 holds 不可否決）；可指派名單 `GET /api/reviewers` |
-| 安全與私隱 | **已加固**：注入偵測前移至送模型之前（規則＋啟發式，**僅提示不保證攔截**）、隔離包裝、輸出審查；`output_gate.py` 讓 `ensure_safe_output()` 真正接入 Web/CLI 評審包、Excel 與通知；去識別化不再 `restore()` 回明文，正則加 Luhn/語境降低誤傷；密鑰環明文不進 `os.environ`；端點 `/api/security/*`；CLI `scripts/vault_cli.py keys` |
-| 字形標準化 | **15 地區**配置；OpenCC `s2hk`/`s2twp`/`t2s` 逐字精確標準化 + 香港標準字白名單；`detect_script` 支援 hant/hans/ja/ko/latin；端點 `/api/script/audit`、`/api/script/regions` |
-| 實測缺陷 | **4 個已修**（截止時間/評委人數/歷史包導出/列表分頁，見 §4） |
-| 合併狀態 | **全部併入 `main`**；本地與遠端 tree 一致、工作區乾淨、CI 全綠（確切 SHA 見 `git rev-parse HEAD`）；`v1.0.0`/`v1.1.0` tag 保留，v1.2.0 已移除，版本號現為 v1.1.0 |
+| 身份與角色 | P0-06/07 已落地：所有 /api 需 HTTP Basic；角色矩陣 operator/reviewer/approver/finance/admin（經辦另含評審指派）；Basic 短時快取降低 scrypt 成本、停用即清空；遠端模式不建立/自動停用弱口令演示賬號；評分身份綁定登入帳號（`reviewer_id`），衝突以結構化 ID 比對；`decline_allowed` 已修復「缺材料不能否決」；前端移除寫死 demo 提示 |
+| 評審工作流 | P1-04 已落地：個案級評審指派（`POST /assignments`，operator，經 auth 校驗 reviewer 角色）→ 利益申報（`POST /conflict`；申報有衝突即迴避、移除其評分、須經辦替補）→ 獨立評分（`POST /scores`，身份綁定 upsert，未指派/未申報/已迴避一律拒收）→ 真盲評投影（`blind.py`：reviewer 角色簽發前看不到申請人身份、聯絡方式與他人評分，衝突由服務端規則自動比對，簽發後解除）；狀態機新增 `pending_assignment`（插在待評分之前、材料/資格/複議之後，並列入程序性 holds 不可否決）；可指派名單 `GET /api/reviewers` |
+| 安全與私隱 | 已加固：注入偵測前移至送模型之前（規則＋啟發式，**僅提示不保證攔截**）、隔離包裝、輸出審查；`output_gate.py` 讓 `ensure_safe_output()` 真正接入 Web/CLI 評審包、Excel 與通知；去識別化不再 `restore()` 回明文，正則加 Luhn/語境降低誤傷；密鑰環明文不進 `os.environ`；端點 `/api/security/*`；CLI `scripts/vault_cli.py keys` |
+| 字形標準化 | 15 地區配置；OpenCC `s2hk`/`s2twp`/`t2s` 逐字精確標準化 + 香港標準字白名單；`detect_script` 支援 hant/hans/ja/ko/latin；端點 `/api/script/audit`、`/api/script/regions` |
+| 實測缺陷 | 4 個已修（截止時間/評委人數/歷史包導出/列表分頁，見 §4） |
+| 合併狀態 | 全部併入 `main`；本地與遠端 tree 一致、工作區乾淨、CI 全綠（確切 SHA 見 `git rev-parse HEAD`）；`v1.0.0`/`v1.1.0` tag 保留，v1.2.0 已移除，版本號現為 v1.1.0 |
 | 人工驗收 | 完整瀏覽器流程、真實 OCR、機構資料、人工工時基線仍待驗收 |
-| 審評整改 | P0-01～07、11 的代碼項均已修（依賴鎖定、演示入口、統一評估口徑、簽發快照、自報日期移除、台帳額度/未來日期/往返保真、本地賬號+HTTP Basic+服務端操作者+停用即時生效、**角色授權矩陣 P0-07**）；剩餘 P0 多為機構人工項（OIDC/SSO、環境分離、備份演練、審計獨立保存） |
+| 審評整改 | P0-01～07、11 的代碼項均已修（依賴鎖定、演示入口、統一評估口徑、簽發快照、自報日期移除、台帳額度/未來日期/往返保真、本地賬號+HTTP Basic+服務端操作者+停用即時生效、角色授權矩陣 P0-07）；剩餘 P0 多為機構人工項（OIDC/SSO、環境分離、備份演練、審計獨立保存） |
 
 ---
 
 ## 2. 歷史線說明（接手必讀，最容易迷惑的部分）
 
-這個倉庫早期經歷過**三條線**，但**已全部收斂到單一 `main`**。接手前請理解拓撲：
+這個倉庫早期經歷過三條線，現已全部收斂到單一 `main`。接手前請理解拓撲：
 
 ```
 main  ← [主線] 唯一主線：本地與遠端一致、CI 全綠（HEAD 見 git rev-parse）
@@ -52,7 +52,7 @@ main  ← [主線] 唯一主線：本地與遠端一致、CI 全綠（HEAD 見 g
 ```
 
 **要點**：
-1. `origin/main` 早期曾被 force push 重寫（舊 `bd1a4fb` 歷史不再位於 main 上）——不要用舊 SHA 找代碼。
+1. `origin/main` 早期曾被 force push 重寫（舊 `bd1a4fb` 歷史不再位於 main 上）。不要用舊 SHA 找代碼。
 2. 兩條 `codex/*` 分支的內容**均已併入 main**，現只剩歷史對照價值。
 3. **新工作一律從 `main` 開分支**；PR 目標為 `main`。
 4. 兩線融合的詳細決策記錄在早期提交 `b6e8d2f` / `9f6de78` 的 commit message。
@@ -113,10 +113,10 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 ## 5. 接手必讀：六個關鍵設計決策
 
 1. **人工簽發原則**：`assess()` 的 `notice` 恆為 `None`，正式通知只在工作台簽發時生成（`result_notice`）；CLI/導出寫的是 `review_draft()` 評審進度草稿。任何改動不得讓系統自動出正式通知。
-2. **assess 的 holds 順序即狀態語義**：`pending_deliberation → needs_materials → needs_compliance → invalid_scores → pending_assignment → pending_scores → insufficient_reviews → needs_review`；`status = holds[0]`。調整順序會改變個案首選狀態與測試（P1-04 把「待指派評審」插在「待評分」之前——指派是評分的前置條件，但排在材料/資格/複議之後；`pending_assignment` 亦列入程序性 holds，不可否決）。
-3. **`get_llm('auto')` 恆回本地 MockLLM**：外部模型須顯式指定 kind 且環境有密鑰。這是受控模型端點策略（審評 P2-04）——Web 預設不出境。
+2. assess 的 holds 順序即狀態語義：`pending_deliberation → needs_materials → needs_compliance → invalid_scores → pending_assignment → pending_scores → insufficient_reviews → needs_review`；`status = holds[0]`。調整順序會改變個案首選狀態與測試（P1-04 把「待指派評審」插在「待評分」之前。指派是評分的前置條件，但排在材料/資格/複議之後；`pending_assignment` 亦列入程序性 holds，不可否決）。
+3. `get_llm('auto')` 恆回本地 MockLLM：外部模型須顯式指定 kind 且環境有密鑰。這是受控模型端點策略（審評 P2-04），Web 預設不出境。
 4. **計劃快照隨案**：`case["program_snapshot"]` 是歷史個案可查閱/匯出的依據；`Program.from_snapshot` 會重建嵌套 dataclass。改 `Program` 欄位時同步維護快照兼容。
-5. **`min_reviewers` 兩個內置計劃均已設 2**：新建計劃 YAML 亦應設定（低於人數產生 `insufficient_reviews` hold，簽發被擋）。簽發時 decision 內保存 `program_snapshot` 鎖定規則版本——歷史包對應簽發時規則，避免「舊結果配新維度」。
+5. `min_reviewers` 兩個內置計劃均已設 2：新建計劃 YAML 亦應設定（低於人數產生 `insufficient_reviews` hold，簽發被擋）。簽發時 decision 內保存 `program_snapshot` 鎖定規則版本。歷史包對應簽發時規則，避免「舊結果配新維度」。
 6. **舊簡體輸入是語義夾具**：`data/demo/applications/app002`（簡體附件 vs 繁體表單 = 跨源矛盾發現的來源）與 `reviews_demo.json`（簡體 criteria 鍵兼容）**不得轉繁**；語言檢查的豁免清單/警告模式即為此服務。
 7. **評審獨立性三閘（P1-04）**：① 評審只可經 `POST /scores` 提交**本人**那一行（服務端綁定 `reviewer_id`，未指派/未申報/已迴避一律 422）；② 申報利益衝突即迴避並**移除其已有評分**（審計留痕），活躍指派不足 `min_reviewers` 時個案回到待指派、須經辦替補；③ **盲評投影** `_blind()`：reviewer 角色在簽發前不見他人評分/加權總分/分歧，簽發後解除。批量 `PUT /scores` 保留為本機演示（遠端模式本就綁定身份）與 admin 更正通道。改評分相關代碼時，這三閘與 `tests/test_assignments.py` 必須同步守住。
 
@@ -133,7 +133,7 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 | 界面 | `app.py`、`web/*`、`cli.py` | API、前端、CLI |
 | 導出與基準 | `src/kkg/export.py`、`scripts/benchmark.py`、`scripts/pitch_demo.py` | 匯出、量化、演示 |
 
-**提交規範**：commit 用繁體中文補英文前綴（`feat:`/`fix:`/`docs:`）；**禁止提交** `.env`、任何本地 DB（`output/` 已被忽略）、任何真實機構資料；改 `Program`/`check.py`/`review.py` 必須附全套測試與語言檢查結果。**推送前必先 `git fetch origin` 確認遠端 SHA**（見 §2 第 5 點教訓）；git 的 GnuTLS 後推送不穩時改用 GitHub Git Data API。`main` 已打 `v1.0.0`/`v1.1.0` tag——正式版本變更走 PR + 新 tag，不急於升版。
+提交規範：commit 用繁體中文補英文前綴（`feat:`/`fix:`/`docs:`）；禁止提交 `.env`、任何本地 DB（`output/` 已被忽略）、任何真實機構資料；改 `Program`/`check.py`/`review.py` 必須附全套測試與語言檢查結果。推送前必先 `git fetch origin` 確認遠端 SHA（見 §2 第 5 點教訓）；git 的 GnuTLS 後推送不穩時改用 GitHub Git Data API。`main` 已打 `v1.0.0`/`v1.1.0` tag。正式版本變更走 PR + 新 tag，不急於升版。
 
 **PR 檢查清單**：
 - [ ] `python -m pytest tests -q` 141/141 全綠
@@ -146,7 +146,7 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 
 ## 7. 已知風險與限制（如實）
 
-1. **P0 人工項未動**（審評清單）：機構 OIDC/SSO、環境分離、收件連接器、備份恢復演練、審計獨立保存——接真實資料前的硬性前置，需機構決策與人工執行。（代碼側的 HTTP Basic 身份與角色矩陣 P0-06/07 已落地，但不替代機構級 OIDC/SSO。）
+1. P0 人工項未動（審評清單）：機構 OIDC/SSO、環境分離、收件連接器、備份恢復演練、審計獨立保存。這些是接真實資料前的硬性前置，需機構決策與人工執行。（代碼側的 HTTP Basic 身份與角色矩陣 P0-06/07 已落地，但不替代機構級 OIDC/SSO。）
 2. **分頁的批次檢查僅限當前頁**：跨頁重複檢測需 P1 的持久化佇列/索引改造（`workspace.list` docstring 已注明）。
 3. **舊個案無快照**：`program_snapshot` 自本版起記錄；升級前的歷史資料在配置移除後仍會 422（遷移腳本屬 P0-08）。
 4. **`auto` 語義已收緊**：原先 auto 會自動用環境裡的外部模型密鑰，現改為恆本地。若有外部調用需求，請顯式 `--llm openai` 等。

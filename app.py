@@ -235,14 +235,13 @@ ROLE_PROJECT = ("finance",)
 
 
 def _blind(detail: dict, identity: Identity) -> dict:
-    """P1-04 盲評投影：評審角色在簽發前只見自己的評分與狀態
-    （他人評分、加權總分、分歧標記均不可見；簽發後個案全量可見）。"""
-    if identity.role != "reviewer" or detail.get("decision"):
-        return detail
-    mine = [row for row in detail["scores"] if row.get("reviewer_id") == identity.account_id]
-    assessment = {key: detail["assessment"][key] for key in ("status", "holds", "todos")
-                  if key in detail["assessment"]}
-    return {**detail, "scores": mine, "assessment": assessment}
+    """真盲評投影（見 ``kkg.blind``）：評審在簽發前不見申請人身份與他人評分。
+
+    身份（機構/電郵/團隊/聯絡人/檔名）代號化，衝突判定由服務端規則自動比對；
+    簽發後回傳全量。四個讀取/導出端點共用此投影，避免 Blind 只做一半。
+    """
+    from kkg.blind import blind_projection
+    return blind_projection(detail, identity)
 
 
 def create_app(database: str | Path | None = None, configs: Path | None = None,
@@ -251,10 +250,10 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
     runtime = runtime or RuntimeConfig.from_env()
     auth_store = AuthStore(Path(database).parent / "auth.sqlite3")
     created = auth_store.ensure_defaults(os.environ.get("GRANTFLOW_BOOTSTRAP_PASSWORD"),
-                                         demo=not runtime.remote_access)
-    if runtime.remote_access:
+                                         demo=not runtime.strict_identity)
+    if runtime.strict_identity:
         # 即使沿用了本機演示資料庫，遠端部署也一律停用弱口令角色賬號。
-        for demo_account in ("demo", "reviewer_demo", "approver_demo", "finance_demo"):
+        for demo_account in ("demo", "reviewer_demo", "reviewer2_demo", "approver_demo", "finance_demo"):
             auth_store.set_disabled(demo_account, disabled=True)
     if "admin" in created:
         print(f"[auth] 初始管理員：admin / {created['admin']}（請立即記錄並更換口令）")
@@ -420,11 +419,17 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
                                        identity.display_name, metadata, files, options["removed"])
 
     @api.put("/api/cases/{case_id}/scores")
-    def score(case_id: str, data: ScoresInput, identity: Identity = Depends(_require_role(*ROLE_SCORES))):
-        # 遠端部署：評審身份必須綁定服務端登入帳號，忽略前端自填姓名/ID，
-        # 同一帳號不得重複提交多份評分。本機演示模式保留舊行為以便重現示範。
-        # P1-04：本端點為批量通道（本機演示/管理員更正用）；評審工作流請走下方 POST 身份綁定端點。
-        remote = api.state.runtime.remote_access
+    def score(case_id: str, data: ScoresInput, identity: Identity = Depends(_require_identity)):
+        # P1-04 修復（舊 PUT 通道繞過）：批量 PUT 一度僅要求 reviewer 角色，評委只要把
+        # HTTP 方法從 POST 換成 PUT，就能略過「指派→利益申報→身份綁定評分」三段式流程，
+        # 因 workspace.score() 沒有任何前置校驗。遠端部署收窄為經辦/管理員更正通道；
+        # 本機演示保留評委便捷通道（前端與文檔標註「僅限本地演示」）。
+        remote = api.state.runtime.strict_identity
+        allowed = ("operator", "admin") if remote else ROLE_SCORES
+        if identity.role != "admin" and identity.role not in allowed:
+            scope = "遠端部署僅供經辦或管理員更正" if remote else "僅供本機演示或管理員更正"
+            raise Forbidden(f"批量評分通道{scope}使用；評委請透過「我的評審任務」逐筆提交。")
+        # 遠端部署：忽略前端自填姓名/ID，強制綁定登入帳號；本機演示保留舊行為以便重現示範。
         rows: list[ReviewScore] = []
         for row in data.scores:
             payload = row.model_dump()
@@ -525,7 +530,9 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
         與 CLI `[7/7]` 共用同一套規則式生成邏輯；輸出已去識別化。這是能力
         可達性端點——Web 操作員無需跑命令列即可查閱五項可追溯模組的結果。
         """
-        return workspace.traceability(case_id)
+        result = workspace.traceability(case_id)
+        from kkg.blind import blind_traceability
+        return blind_traceability(result, identity)
 
     @api.get("/api/cases/{case_id}/report", response_class=PlainTextResponse)
     def report(case_id: str, identity: Identity = Depends(_require_identity)):
@@ -643,7 +650,9 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
     # ---------- P0-06：身份端點 ----------
     @api.get("/api/auth/me")
     def me(identity: Identity = Depends(_require_identity)):
-        return {"account_id": identity.account_id, "display_name": identity.display_name, "role": identity.role}
+        return {"account_id": identity.account_id, "display_name": identity.display_name,
+                "role": identity.role, "demo_mode": not api.state.runtime.strict_identity,
+                "identity_enforced": api.state.runtime.strict_identity}
 
     @api.post("/api/auth/login")
     def login(data: LoginInput):

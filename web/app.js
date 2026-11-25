@@ -608,8 +608,8 @@ function myScoreForm(record, program) {
 function conflictForm(record, hasConflict) {
   const note = input("textarea", "");
   const items = hasConflict
-    ? [field("申報說明（選填）", note, "可記錄衝突性質，例如與申請團隊的關係。確認後你會被迴避，已交評分將被移除。", true)]
-    : [el("p", "hint", "確認與此個案無利益衝突後，即可填寫並提交評分。")];
+    ? [field("申報說明（選填）", note, "申請人身份已匿名；如你知悉與此個案有利益關係，請申報。確認後你會被迴避，已交評分將被移除。", true)]
+    : [el("p", "hint", "申請人身份已匿名；服務端亦會按衝突規則自動核對。確認無利益衝突後即可評分。")];
   return saveForm(hasConflict ? "申報利益衝突（迴避）" : "申報無利益衝突", items, {
     inCase: true, label: "確認申報", success: "已記錄利益申報。",
     submit: () => jsonRequest(`${casePath(record.id)}/conflict`, "POST",
@@ -1252,6 +1252,9 @@ async function loadMe() {
   try {
     state.me = await api("/api/auth/me");
     demoButton.hidden = Boolean(state.me) && !["operator", "admin"].includes(state.me.role);
+    if (state.me?.demo_mode) {
+      notice("本機演示模式：弱口令賬號與批量評分便捷通道已開啟，禁止用於真實評審。如要啟用身份綁定，請以 GRANTFLOW_ENFORCE_IDENTITY=1 啟動。", "error", true);
+    }
   } catch {
     state.me = null;
   }
