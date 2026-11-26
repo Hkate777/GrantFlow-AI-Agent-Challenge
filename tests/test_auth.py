@@ -133,3 +133,44 @@ def test_non_admin_cannot_disable_accounts(tmp_path):
     client = _client(tmp_path / "cases.sqlite3")
     response = client.post("/api/auth/disable", json={"username": "admin"})
     assert response.status_code == 403
+
+
+def test_logout_revokes_bearer_session_immediately(tmp_path):
+    """登出兑現：撤銷後同一 token 即時失效，無法再取用業務 API。"""
+    client = _client(tmp_path / "cases.sqlite3", auth=None)
+    login = client.post("/api/auth/login", json={"username": "demo", "password": "demo"})
+    token = login.json()["token"]
+    bearer = {"Authorization": f"Bearer {token}"}
+    assert client.get("/api/auth/me", headers=bearer).status_code == 200
+
+    logout = client.post("/api/auth/logout", headers=bearer)
+    assert logout.status_code == 200
+    assert logout.json()["session_revoked"] is True
+    assert logout.json()["auth_method"] == "bearer"
+
+    # 撤銷後同一 token 立即 401；其他會話不受影響。
+    assert client.get("/api/auth/me", headers=bearer).status_code == 401
+    assert client.get("/api/cases", headers=bearer).status_code == 401
+    other = client.post("/api/auth/login", json={"username": "demo", "password": "demo"}).json()["token"]
+    assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {other}"}).status_code == 200
+
+
+def test_logout_with_basic_reports_no_server_session(tmp_path):
+    """Basic 無服務端會話可撤，如實回報，避免虛假的「已安全登出」。"""
+    client = _client(tmp_path / "cases.sqlite3")
+    logout = client.post("/api/auth/logout")
+    assert logout.status_code == 200
+    assert logout.json()["session_revoked"] is False
+    assert logout.json()["auth_method"] == "basic"
+
+
+def test_me_reports_auth_method(tmp_path):
+    client = _client(tmp_path / "cases.sqlite3", auth=None)
+    basic = _client(tmp_path / "cases.sqlite3")
+    assert basic.get("/api/auth/me").json()["auth_method"] == "basic"
+    token = client.post("/api/auth/login",
+                        json={"username": "demo", "password": "demo"}).json()["token"]
+    bearer_me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"}).json()
+    assert bearer_me["auth_method"] == "bearer"
+    assert "expires_in_hours" in client.post(
+        "/api/auth/login", json={"username": "demo", "password": "demo"}).json()

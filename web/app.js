@@ -206,15 +206,33 @@ function readRoute() {
   return { view: "list", queue: queues.some((queue) => queue.key === key) ? key : "all" };
 }
 
+const TOKEN_KEY = "grantflow.session.token";
+
+function sessionToken() {
+  try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; }
+}
+
+function setSessionToken(token) {
+  try {
+    if (token) sessionStorage.setItem(TOKEN_KEY, token);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch { /* 私隱模式下 storage 不可用，降級為不持久化 */ }
+}
+
 async function api(path, options = {}) {
+  const headers = { Accept: "application/json", ...options.headers };
+  const token = sessionToken();
+  if (token && !headers.Authorization) headers.Authorization = `Bearer ${token}`;
   let response;
   try {
-    response = await fetch(path, { ...options, headers: { Accept: "application/json", ...options.headers } });
+    response = await fetch(path, { ...options, headers });
   } catch {
     throw new Error("無法連接本機伺服器。請確認程式正在執行後重試。");
   }
   const data = await response.json().catch(() => null);
   if (response.ok && data !== null) return data;
+  // Bearer 會話失效時清除本機 token，讓下次操作回到登入流程。
+  if (response.status === 401 && token) setSessionToken("");
   const detail = data?.detail;
   const description = Array.isArray(detail) ? detail.map((item) => item.msg || valueText(item)).join("。") : detail;
   const message = response.status === 401
@@ -1252,6 +1270,84 @@ document.querySelector(".skip-link").addEventListener("click", (event) => { even
 demoButton.addEventListener("click", importDemo);
 window.addEventListener("hashchange", () => navigate());
 
+function renderAuthControls() {
+  const toggle = document.querySelector("#auth-toggle");
+  const identity = document.querySelector("#auth-identity");
+  if (!toggle || !identity) return;
+  toggle.hidden = false;
+  if (state.me) {
+    toggle.textContent = "登出";
+    identity.textContent = `${state.me.display_name}（${state.me.role}）`;
+    identity.hidden = state.me.auth_method !== "bearer";
+  } else {
+    toggle.textContent = "登入";
+    identity.hidden = true;
+  }
+}
+
+function showLoginDialog() {
+  document.querySelector("#login-backdrop")?.remove();
+  const username = el("input");
+  username.type = "text";
+  username.autocomplete = "username";
+  username.placeholder = "賬號";
+  const password = el("input");
+  password.type = "password";
+  password.autocomplete = "current-password";
+  password.placeholder = "口令";
+  const message = el("p", "message");
+  const submit = button("登入", async () => {
+    submit.disabled = true;
+    message.textContent = "正在登入…";
+    try {
+      const result = await api("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.value.trim(), password: password.value }),
+      });
+      setSessionToken(result.token);
+      document.querySelector("#login-backdrop")?.remove();
+      await loadMe();
+      notice(`已登入：${result.display_name}`, "ok");
+      navigate(false);
+      state.listReady = false;
+      if (!state.registryLoading) reloadRegistry();
+    } catch (error) {
+      message.textContent = error.message || "登入失敗。";
+      submit.disabled = false;
+    }
+  }, "primary");
+  const cancel = button("取消", () => document.querySelector("#login-backdrop")?.remove());
+  const form = el("div", "login-card",
+    el("h2", "", "登入工作台"),
+    el("div", "stack",
+      field("賬號", username), field("口令", password), message,
+      el("div", "row", submit, cancel)));
+  form.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submit.click();
+  });
+  const backdrop = el("div", "login-backdrop", form);
+  backdrop.id = "login-backdrop";
+  document.body.append(backdrop);
+  username.focus();
+}
+
+async function toggleAuth() {
+  if (!state.me) return showLoginDialog();
+  const token = sessionToken();
+  if (token) {
+    try { await api("/api/auth/logout", { method: "POST" }); } catch { /* 服務端可能已過期，本機仍清除 */ }
+  }
+  setSessionToken("");
+  state.me = null;
+  renderAuthControls();
+  demoButton.hidden = false;
+  notice("已登出。Basic 瀏覽器快取可能仍有效，請關閉瀏覽器以完全登出。", "ok");
+  state.listReady = false;
+  navigate(false);
+  if (!state.registryLoading) reloadRegistry();
+}
+
 async function loadMe() {
   // P1-04：取得登入角色以顯隱界面；取得失敗（未登入/舊後端）時保持原有界面，服務端仍為硬閘。
   try {
@@ -1263,7 +1359,10 @@ async function loadMe() {
   } catch {
     state.me = null;
   }
+  renderAuthControls();
 }
+
+document.querySelector("#auth-toggle")?.addEventListener("click", toggleAuth);
 
 loadMe().finally(() => {
   navigate(false);

@@ -663,9 +663,12 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
 
     # ---------- P0-06：身份端點 ----------
     @api.get("/api/auth/me")
-    def me(identity: Identity = Depends(_require_identity)):
+    def me(request: Request, identity: Identity = Depends(_require_identity)):
+        authorization = request.headers.get("authorization") or ""
+        method = "bearer" if authorization.lower().startswith("bearer ") else "basic"
         return {"account_id": identity.account_id, "display_name": identity.display_name,
-                "role": identity.role, "demo_mode": not api.state.runtime.strict_identity,
+                "role": identity.role, "auth_method": method,
+                "demo_mode": not api.state.runtime.strict_identity,
                 "identity_enforced": api.state.runtime.strict_identity}
 
     @api.post("/api/auth/login")
@@ -676,8 +679,26 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
             raise HTTPException(401, str(exc),
                                 headers={"WWW-Authenticate": 'Basic realm="GrantFlow", charset="UTF-8"'}) from exc
         token = auth_store.create_session(identity)
+        from kkg.auth import SESSION_TTL_HOURS
         return {"token": token, "account_id": identity.account_id,
-                "display_name": identity.display_name, "role": identity.role}
+                "display_name": identity.display_name, "role": identity.role,
+                "expires_in_hours": SESSION_TTL_HOURS}
+
+    @api.post("/api/auth/logout")
+    def logout(request: Request, identity: Identity = Depends(_require_identity)):
+        """登出：撤銷當前 Bearer 會話，使其即時失效（Basic 無服務端會話可撤）。
+
+        前端持 token 登出後須自行清除本機存儲；此端點只保證服務端 token 失效。
+        以 Basic 登入時回 ``session_revoked=False``，提示呼叫方改用 Bearer 登入
+        才能享有可登出的會話。
+        """
+        authorization = request.headers.get("authorization") or ""
+        if authorization.lower().startswith("bearer "):
+            token = authorization.split(" ", 1)[1].strip()
+            revoked = auth_store.revoke_session(token)
+            return {"session_revoked": revoked, "auth_method": "bearer"}
+        return {"session_revoked": False, "auth_method": "basic",
+                "note": "Basic 憑據由瀏覽器快取，服務端無會話可撤；請關閉瀏覽器或改用 Bearer 登入。"}
 
     @api.get("/api/auth/accounts")
     def auth_accounts(identity: Identity = Depends(_require_identity)):

@@ -198,6 +198,17 @@ class AuthStore:
                 (token, identity.account_id, _now().isoformat(timespec="seconds"), expires))
         return token
 
+    def revoke_session(self, token: str) -> bool:
+        """撤銷單一會話（登出）；回傳是否找到並撤銷。冪等：已撤銷仍回 True。"""
+        token = (token or "").strip()
+        if not token:
+            return False
+        with self._connect() as connection:
+            self._ensure_schema(connection)
+            cursor = connection.execute(
+                "UPDATE sessions SET revoked=1 WHERE token=?", (token,))
+        return cursor.rowcount == 1
+
     def identity_from_token(self, token: str) -> Identity:
         with self._connect() as connection:
             row = connection.execute("SELECT * FROM sessions WHERE token=?", (token,)).fetchone()
