@@ -178,7 +178,10 @@ def blind_projection(detail: dict, identity: Any) -> dict:
     # 但保留 finding_type/severity/subject_id 供前端顯示狀態。
     out["findings"] = [{**finding,
                         "message": _scrub(finding.get("message", ""), terms, alias),
-                        "detail": _scrub(finding.get("detail", ""), terms, alias)}
+                        "detail": _scrub(finding.get("detail", ""), terms, alias),
+                        # source 可能含原始檔名（如「啓明科技_申請書.txt」），
+                        # 評審包導出的 findings.json 會用到，須一併遮蔽。
+                        "source": _scrub(finding.get("source", ""), terms, alias)}
                        for finding in detail.get("findings", [])]
     out["scores"] = mine
     out["assessment"] = assessment
@@ -187,19 +190,83 @@ def blind_projection(detail: dict, identity: Any) -> dict:
     return out
 
 
-def blind_traceability(result: dict, identity: Any) -> dict:
-    """評審在簽發前查看可追溯物料時，遮蔽由他人評分聚合而成的確定性評分。
+def blind_application(app: Any, detail: dict, identity: Any) -> Any:
+    """回傳評審可見的 Application 視圖，供評審包導出使用。
 
-    依據卡、合規分級與 Trace 規則結論不涉及申請人身份或他人分數，保留可見；
-    ``deterministic_score`` 源自全部暫存評分，對評委改為未提供，避免間接
-    得知他人打分。非評委或已簽發個案原樣回傳。
+    ``blind_projection`` 只投影個案詳情字典；評審包（summary／one_pager）另外
+    從 ``Application`` 物件生成，若直接用原始物件會令機構名與團隊成員在導出時
+    重新出現，繞過盲評。此函式與 ``blind_projection`` 共用同一身份詞表與代號，
+    確保詳情與導出物料一致。``detail`` 須為未投影的原始細節以提取身份詞；
+    非評委或已簽發則原樣回傳。
+    """
+    from .models import Application
+
+    if getattr(identity, "role", None) != "reviewer" or detail.get("decision"):
+        return app
+    alias = _alias(str(detail.get("id") or detail.get("app_id") or ""))
+    terms = _identity_terms(detail)
+    fields = _scrub_value(app.fields, terms, alias)
+    for key in ("contact", "org_name", "organization"):
+        if key in fields:
+            fields[key] = alias
+    documents = []
+    for doc in app.docs:
+        segments = [type(seg)(locator=seg.locator,
+                              text=_scrub(seg.text, terms, alias))
+                    for seg in getattr(doc, "segments", [])]
+        documents.append(type(doc)(path=doc.path,
+                                   name=f"{doc.doc_type}（檔名已遮蔽）",
+                                   doc_type=doc.doc_type,
+                                   text=_scrub(doc.text, terms, alias),
+                                   meta=doc.meta, error=doc.error,
+                                   segments=segments))
+    return Application(
+        app_id=app.app_id, program=app.program,
+        title=_scrub(app.title, terms, alias), applicant=alias,
+        email="[電郵已遮蔽]",
+        team=[f"{alias}（團隊成員已遮蔽）"] if app.team else [],
+        fields=fields, docs=documents,
+    )
+
+
+def blind_list_item(item: dict, identity: Any) -> dict:
+    """個案列表項的盲評：評委僅見代號化的申請人與已遮蔽身份詞的標題。
+
+    列表項目只有少量欄位（無完整 detail），因此以 ``applicant`` 重建身份詞表，
+    複用 ``_identity_terms`` 的簡稱／繁簡變體邏輯，確保列表與詳情代號一致。
+    """
+    if getattr(identity, "role", None) != "reviewer":
+        return item
+    out = dict(item)
+    alias = _alias(str(item.get("id") or item.get("app_id") or ""))
+    terms = _identity_terms({"applicant": item.get("applicant"), "fields": {}})
+    out["title"] = _scrub(str(item.get("title") or ""), terms, alias)
+    out["applicant"] = alias
+    out.pop("weighted_total", None)  # 他人彙總分數對評委不可見
+    return out
+
+
+def blind_traceability(result: dict, identity: Any, detail: dict | None = None) -> dict:
+    """評審在簽發前查看可追溯物料時，遮蔽確定性評分與物料中的身份詞。
+
+    ``deterministic_score`` 源自全部暫存評分，對評委改為未提供，避免間接得知
+    他人打分。此外，依據卡的 ``basis[].source/quote`` 與合規 ``excerpt`` 源自
+    申請原文（含檔名），可能帶出機構簡稱——``gate_text`` 只按正則遮蔽電郵／
+    電話／證件，不遮中文機構名，故須在此用身份詞表遞迴遮蔽。傳入 ``detail``
+    （未投影的原始個案詳情）以提取身份詞；省略時僅保留原有分數遮蔽行為。
+    非評委或已簽發個案原樣回傳。
     """
     if getattr(identity, "role", None) != "reviewer" or result.get("signed"):
         return result
     out = dict(result)
+    if detail is not None:
+        terms = _identity_terms(detail)
+        alias = _alias(str(detail.get("id") or detail.get("app_id") or ""))
+        if terms:
+            out = _scrub_value(out, terms, alias)
     out["deterministic_score"] = {
         "withheld": True,
         "note": "確定性評分由全部暫存評分聚合而成，簽發前不對評委顯示。",
     }
-    out["blind"] = {"enabled": True, "note": "他人評分聚合已遮蔽。"}
+    out["blind"] = {"enabled": True, "note": "他人評分聚合與身份詞已遮蔽。"}
     return out

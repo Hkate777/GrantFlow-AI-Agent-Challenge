@@ -150,3 +150,24 @@ def test_local_enforce_identity_switch_makes_single_machine_strict(tmp_path):
     # 嚴格模式下不建立弱口令演示賬號
     assert "demo" not in rows or rows["demo"] is True
     assert "reviewer2_demo" not in rows or rows["reviewer2_demo"] is True
+
+
+def test_host_override_to_non_loopback_recomputes_strict_identity(tmp_path):
+    """--host 0.0.0.0 覆蓋監聽地址時，須按新 host 重建 runtime 並停用演示賬號。
+
+    模組導入時按 loopback 構造的 app 若直接拿去對外監聽，strict_identity 仍為
+    False，演示弱口令賬號未停用、批量評分走本機寬鬆分支，形成安全漏洞。
+    """
+    from dataclasses import replace
+
+    db = str(tmp_path / "host.sqlite3")
+    local_rt = RuntimeConfig(host="127.0.0.1", allowed_hosts=("testserver",))
+    app.create_app(db, runtime=local_rt)  # 建立本機演示賬號
+
+    remote_rt = replace(local_rt, host="0.0.0.0")
+    assert remote_rt.strict_identity is True
+    remote = TestClient(app.create_app(db, runtime=remote_rt), client=("127.0.0.1", 41000))
+    rows = {row["id"]: bool(row["disabled"]) for row in remote.app.state.auth.list_accounts()}
+    assert rows.get("reviewer_demo") is True, "對外監聽時演示評委賬號須停用"
+    demo_login = remote.get("/api/auth/me", headers=_headers("reviewer_demo", "demo"))
+    assert demo_login.status_code == 403

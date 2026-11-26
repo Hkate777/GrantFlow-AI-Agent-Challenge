@@ -114,6 +114,7 @@ class MilestoneRow(Input):
     name: str = Field(max_length=200)
     due: str
     status: Literal["pending", "done"] = "pending"
+    funding_release: StrictFloat = 0  # 里程碑關聯撥款，供台賬合計校驗
 
 
 class ReportRow(Input):
@@ -242,6 +243,12 @@ def _blind(detail: dict, identity: Identity) -> dict:
     """
     from kkg.blind import blind_projection
     return blind_projection(detail, identity)
+
+
+def _blind_app(app, detail: dict, identity: Identity):
+    """評審包導出的盲評視圖：與詳情投影共用身份詞表，避免導出時泄露身份。"""
+    from kkg.blind import blind_application
+    return blind_application(app, detail, identity)
 
 
 def create_app(database: str | Path | None = None, configs: Path | None = None,
@@ -377,10 +384,10 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
         # 不帶分頁參數 → 舊形狀（純陣列，相容既有前端）；帶 limit → 分頁對象。
         result = workspace.list(limit=limit, offset=offset)
         if identity.role == "reviewer":
-            # 盲評：列表對評審隱去加權總分（他人彙總不可見）。
-            items = [{key: value for key, value in item.items() if key != "weighted_total"}
-                     for item in result["items"]]
-            result = {**result, "items": items}
+            # 盲評：列表對評審代號化申請人、遮蔽標題身份詞並隱去加權總分。
+            from kkg.blind import blind_list_item
+            result = {**result,
+                      "items": [blind_list_item(item, identity) for item in result["items"]]}
         return result["items"] if limit is None else result
 
     @api.get("/api/cases/{case_id}")
@@ -430,6 +437,9 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
             scope = "遠端部署僅供經辦或管理員更正" if remote else "僅供本機演示或管理員更正"
             raise Forbidden(f"批量評分通道{scope}使用；評委請透過「我的評審任務」逐筆提交。")
         # 遠端部署：忽略前端自填姓名/ID，強制綁定登入帳號；本機演示保留舊行為以便重現示範。
+        # 注意：此綁定令遠端批量通道實際只接受單行（多行會因同名被拒），這是
+        # 「防止管理員偽造多行評委評分」的刻意取捨；需要多行committee評分時，
+        # 由多名評委各自走 POST /scores 的指派→申報→身份綁定流程。
         rows: list[ReviewScore] = []
         for row in data.scores:
             payload = row.model_dump()
@@ -481,8 +491,11 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
 
     @api.get("/api/cases/{case_id}/pack")
     def pack(case_id: str, identity: Identity = Depends(_require_identity)):
-        detail, app = workspace.get(case_id)
-        detail = _blind(detail, identity)  # P1-04：評審導出的評審包同樣盲評
+        raw_detail, app = workspace.get(case_id)
+        detail = _blind(raw_detail, identity)  # P1-04：評審導出的評審包同樣盲評
+        # 修復：評審包由 Application 物件另起一份生成，須用原始細節同步盲評，
+        # 否則機構名／團隊成員會在 summary/one_pager 重現，繞過 detail 的盲評。
+        app = _blind_app(app, raw_detail, identity)
         # 計劃定義優先序：簽發時快照（版本鎖定）→ 收件時快照 → 當前配置。
         # 避免同名計劃改版後出現「舊結果配新維度」的歷史包。
         decision = detail["decision"] or {}
@@ -530,9 +543,10 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
         與 CLI `[7/7]` 共用同一套規則式生成邏輯；輸出已去識別化。這是能力
         可達性端點——Web 操作員無需跑命令列即可查閱五項可追溯模組的結果。
         """
+        raw_detail, _ = workspace.get(case_id)
         result = workspace.traceability(case_id)
         from kkg.blind import blind_traceability
-        return blind_traceability(result, identity)
+        return blind_traceability(result, identity, raw_detail)
 
     @api.get("/api/cases/{case_id}/report", response_class=PlainTextResponse)
     def report(case_id: str, identity: Identity = Depends(_require_identity)):
@@ -691,11 +705,18 @@ app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
+    from dataclasses import replace
 
     runtime: RuntimeConfig = app.state.runtime
     parser = argparse.ArgumentParser(description="啓動 GrantFlow 工作台")
     parser.add_argument("--host", default=runtime.host, help="監聽地址；容器部署用 0.0.0.0")
     parser.add_argument("--port", type=int, default=runtime.port)
     args = parser.parse_args()
+    # --host 覆蓋監聽地址時必須同步重建 runtime：否則模組導入時按 loopback
+    # 構造的 strict_identity 仍為 False，導致演示弱口令賬號未停用、批量評分
+    # 仍走本機寬鬆分支，形成「對外監聽但身份綁定缺席」的漏洞。
+    if args.host != runtime.host:
+        runtime = replace(runtime, host=args.host)
+        app = create_app(runtime=runtime)
     uvicorn.run(app, host=args.host, port=args.port,
                 proxy_headers=runtime.trust_proxy, timeout_keep_alive=5)

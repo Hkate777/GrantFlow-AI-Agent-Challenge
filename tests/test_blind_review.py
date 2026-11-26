@@ -141,3 +141,28 @@ def test_blind_stops_peeling_at_generic_core():
     d["fields"]["project_desc"] = "本項目以科技手段提升資訊透明度。"
     out = blind_projection(d, _reviewer())
     assert out["fields"]["project_desc"] == "本項目以科技手段提升資訊透明度。"
+
+
+def test_blind_application_hides_identity_for_pack_export():
+    """評審包由 Application 另起一份生成，須同步盲評，否則機構名重現。"""
+    from kkg.blind import blind_application
+    from kkg.models import Application
+
+    app = Application(
+        app_id="APP-1", program="P", title="AI 文書助手（啓明科技有限公司）",
+        applicant="啓明科技有限公司", email="ceo@qiming-engine.hk",
+        team=["陳曉峯", "李嘉穎"],
+        fields={"contact": "陳曉峯", "project_desc": "由啓明科技主導"},
+    )
+    detail = {"id": "case-1", "app_id": "APP-1", "applicant": "啓明科技有限公司",
+              "team": ["陳曉峯", "李嘉穎"], "fields": {"contact": "陳曉峯"},
+              "decision": None}
+    out = blind_application(app, detail, _reviewer())
+    assert out.applicant.startswith("Applicant ")
+    assert "啓明" not in out.title and "啓明科技" not in out.fields["project_desc"]
+    assert out.email == "[電郵已遮蔽]"
+    assert out.team and all("遮蔽" in member for member in out.team)
+    # 已簽發或非評委原樣回傳
+    signed = {**detail, "decision": {"outcome": "approved"}}
+    assert blind_application(app, signed, _reviewer()).applicant == "啓明科技有限公司"
+    assert blind_application(app, detail, Identity("op", "經辦", "operator")).applicant == "啓明科技有限公司"

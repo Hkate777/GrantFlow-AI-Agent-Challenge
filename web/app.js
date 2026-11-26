@@ -471,7 +471,7 @@ async function loadCase(id, focus = false, refreshList = false) {
     const record = await api(casePath(id));
     if (request !== state.caseRequest) return;
     state.activeCase = record;
-    if (state.traceData?.id !== id) state.traceData = null;
+    state.traceData = null; // 個案內容可能已變動，可追溯物料須重新生成
     if (refreshList) upsertRecord(record);
     renderBreadcrumbs();
     renderCase(focus);
@@ -767,6 +767,10 @@ function complianceView(data) {
 
 function scoreView(data) {
   const score = data.deterministic_score || {};
+  if (score.withheld) {
+    return panel("確定性評分", el("p", "line-detail", valueText(score.note || "確定性評分由全部暫存評分聚合而成，簽發前不對評委顯示。")),
+      el("span", "hint", "簽發後顯示"));
+  }
   const steps = score.steps || [];
   const rows = steps.map((step) => [valueText(step.name), numberText(step.score), numberText(step.max_score),
     numberText(step.weight), numberText(step.contribution)]);
@@ -944,6 +948,7 @@ function saveForm(title, items, options) {
       if (state.route === activeRoute) {
         if (activeRoute.view === "case") {
           state.activeCase = record;
+          state.traceData = null; // 提交評分／簽批後物料已過期
           state.editor = null;
           renderBreadcrumbs();
           renderCase(true);
