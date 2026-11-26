@@ -82,6 +82,9 @@ for rel in files:
     # semantic_guard.py 的注入語料必須含簡體樣本，才能偵測簡體輸入的注入攻擊，豁免簡體檢查
     if rel == "src/kkg/semantic_guard.py":
         continue
+    # blind.py 的身份詞表必須含簡體機構後綴樣本，才能遮蔽簡體寫法的機構簡稱，豁免簡體檢查
+    if rel == "src/kkg/blind.py":
+        continue
     if converter.convert(normalized) != normalized:
         errors.append(f"{rel}：可能含簡體字或非香港用字，請人工確認")
 

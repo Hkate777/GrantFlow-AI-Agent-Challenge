@@ -21,14 +21,83 @@ from typing import Any
 _ASSESSMENT_PUBLIC = ("status", "holds", "todos")
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
+# 機構名後綴：涵蓋香港、內地與台灣常見的法律形式及行業標籤。
+# 由詞尾逐層剝除，生成「啓明科技」「啓明」等別名；純後綴或不足兩字的
+# 核心不納入，避免「科技」這類通用詞或單字造成誤傷。
+_ORG_SUFFIXES = tuple(sorted((
+    "股份有限公司", "有限責任公司", "有限责任公司", "有限公司",
+    "公司", "集團", "集团", "控股", "實業", "实业", "企業", "企业",
+    "發展", "发展", "國際", "国际", "科技", "技術", "技术",
+    "網絡", "网络", "資訊", "信息",
+), key=len, reverse=True))
+
 
 def _alias(case_id: str) -> str:
     digest = hashlib.sha256((case_id or "").encode("utf-8")).digest()
     return f"Applicant {chr(ord('A') + digest[0] % 26)}"
 
 
+def _org_variants(name: str) -> list[str]:
+    """由完整機構名逐層剝除後綴生成別名。
+
+    「啓明科技有限公司」衍生「啓明科技」與「啓明」；沒有匹配後綴的
+    詞（如人名「陳曉峯」）不產生變體，避免把姓名切成無意義片段。
+    """
+    current = name.strip()
+    variants: list[str] = []
+    seen = {current}
+    while True:
+        nxt: str | None = None
+        for suffix in _ORG_SUFFIXES:
+            if current.endswith(suffix) and len(current) - len(suffix) >= 2:
+                candidate = current[: -len(suffix)].strip()
+                # 核心若仍屬後綴詞（「科技發展」剝成「科技」），停止剝除，
+                # 避免把通用詞當成身份詞，誤遮評分所需的正文。
+                if candidate in _ORG_SUFFIXES:
+                    continue
+                if candidate not in seen:
+                    nxt = candidate
+                    break
+        if nxt is None:
+            break
+        variants.append(nxt)
+        seen.add(nxt)
+        current = nxt
+    return variants
+
+
+def _script_variants(term: str) -> list[str]:
+    """生成繁簡字形變體，覆蓋自由文本與身份欄位字形不一致的情況。
+
+    opencc 為可選依賴；缺失時只保留原詞，盲評主流程不受影響。
+    """
+    variants = {term}
+    if not re.search(r"[\u4e00-\u9fff]", term):
+        return variants
+    try:
+        from kkg.script import _converter
+    except ImportError:
+        return variants
+    for config in ("t2s", "s2t", "s2twp"):
+        converter = _converter(config)
+        if converter is None:
+            continue
+        try:
+            converted = converter.convert(term)
+        except Exception:
+            continue
+        if converted:
+            variants.add(converted)
+    return variants
+
+
 def _identity_terms(detail: dict) -> list[str]:
-    """收集需要從自由文本遮蔽的身份詞（長詞優先，避免部分替換）。"""
+    """收集需要從自由文本遮蔽的身份詞（長詞優先，避免部分替換）。
+
+    除完整身份值外，亦納入機構名剝離後綴的別名（「啓明科技有限公司」
+    衍生「啓明科技」「啓明」）及其繁簡字形變體，避免評委從自由文本
+    中的簡稱或異體寫法間接辨識申請人。電郵另按模式遮蔽，不限於欄位值。
+    """
     app = detail.get("application") or {}
     terms: list[str] = []
     applicant = detail.get("applicant") or app.get("applicant")
@@ -41,8 +110,15 @@ def _identity_terms(detail: dict) -> list[str]:
     for key in ("contact", "applicant", "org_name", "organization"):
         if fields.get(key):
             terms.append(str(fields[key]))
-    # 電郵按模式遮蔽（不限於欄位值，覆蓋自由文本中的地址）
-    return sorted({term for term in terms if len(term) >= 2}, key=len, reverse=True)
+
+    expanded: set[str] = set()
+    for term in terms:
+        expanded.add(term)
+        expanded.update(_org_variants(term))
+    final: set[str] = set()
+    for term in expanded:
+        final.update(_script_variants(term))
+    return sorted({term for term in final if len(term) >= 2}, key=len, reverse=True)
 
 
 def _scrub(text: str, terms: list[str], alias: str) -> str:
@@ -90,7 +166,7 @@ def blind_projection(detail: dict, identity: Any) -> dict:
     out["email"] = "[電郵已遮蔽]"
     out["team"] = ["[團隊成員已遮蔽]"] if detail.get("team") else []
     out["fields"] = _scrub_value(detail.get("fields", {}), terms, alias)
-    # 移除联系人类字段值（键保留以维持结构，值代号化）
+    # 移除聯繫人類別欄位值（鍵保留以維持結構，值代號化）
     for key in ("contact", "org_name", "organization"):
         if key in out["fields"]:
             out["fields"][key] = alias

@@ -95,3 +95,49 @@ def test_traceability_visible_after_signoff_and_for_operator():
     assert blind_traceability(signed, _reviewer())["deterministic_score"]["total"] == 88
     unsigned = {"deterministic_score": {"total": 88}, "signed": False}
     assert blind_traceability(unsigned, Identity("op", "經辦", "operator"))["deterministic_score"]["total"] == 88
+
+
+def test_blind_scrubs_org_abbreviations_in_project_desc():
+    """自由文本只寫簡稱時亦須遮蔽，評分依據同時保留。"""
+    d = _detail()
+    d["fields"]["project_desc"] = "本項目由啓明科技主導，啓明科技負責合規文書，合作方為啓明。"
+    out = blind_projection(d, _reviewer())
+    desc = out["fields"]["project_desc"]
+    assert "啓明科技" not in desc
+    assert "啓明" not in desc
+    assert desc.count("Applicant ") == 3
+    assert out["fields"]["budget"] == 280000
+    assert out["fields"]["duration_m"] == 12
+
+
+def test_blind_scrubs_cross_script_variants():
+    """身份欄位為繁體、自由文本用簡體或台灣異體時仍須遮蔽。"""
+    d = _detail()
+    simplified = "\u542f\u660e"          # 內地簡體寫法（以轉義構造，避免原始碼出現簡體字）
+    taiwan = "\u555f\u660e"             # 啟明：台灣寫法
+    d["fields"]["project_desc"] = (
+        f"{simplified}科技有限公司與{simplified}科技合作，另見{taiwan}方案。"
+    )
+    out = blind_projection(d, _reviewer())
+    desc = out["fields"]["project_desc"]
+    assert simplified not in desc
+    assert taiwan not in desc
+    assert f"{simplified}科技" not in desc
+    assert desc.count("Applicant ") == 3
+
+
+def test_blind_does_not_scrub_common_words():
+    """後綴本身不是身份詞，不得把「科技」「資訊」這類通用詞誤遮。"""
+    d = _detail()
+    d["fields"]["project_desc"] = "本項目運用科技手段，強調資訊透明。"
+    out = blind_projection(d, _reviewer())
+    assert out["fields"]["project_desc"] == "本項目運用科技手段，強調資訊透明。"
+
+
+def test_blind_stops_peeling_at_generic_core():
+    """機構核心降解為通用後綴詞時停止，避免誤遮正文。"""
+    d = _detail()
+    d["applicant"] = "科技發展有限公司"
+    d["fields"]["project_desc"] = "本項目以科技手段提升資訊透明度。"
+    out = blind_projection(d, _reviewer())
+    assert out["fields"]["project_desc"] == "本項目以科技手段提升資訊透明度。"
