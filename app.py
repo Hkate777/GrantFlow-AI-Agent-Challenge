@@ -26,6 +26,7 @@ BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE / "src"))
 
 from kkg import __version__
+from kkg.access import CaseNotVisible, grant_key, normalize_grants
 from kkg.auth import AccountDisabled, AuthError, AuthStore, Forbidden, Identity
 from kkg.guard import review_output, scan_prompt_injection
 from kkg.llm import MockLLM, get_llm
@@ -268,6 +269,37 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
             print("[auth] 本機演示賬號已建立（口令 demo）；遠端部署會自動停用。")
     workspace = Workspace(CaseStore(database), _programs(configs or BASE / "configs"))
 
+    # P0-02/03 骨架：個案級授權表持久化在 DB 同目錄的 case_grants.json。
+    # 檔案不存在 = 未設定任何授權；case_scope 開關決定是否啟用過濾。
+    grants_path = Path(database).parent / "case_grants.json"
+
+    def _load_grants() -> dict[str, set[str]] | None:
+        # 檔案不存在 = 未設定白名單 → 回 None 走指派模式；檔案存在（哪怕是空表）
+        # 才回空 dict 進入白名單模式。兩者語義不同，不能混為一談。
+        try:
+            raw = grants_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        try:
+            return normalize_grants(json.loads(raw))
+        except ValueError:
+            return None
+
+    def _save_grants(data: dict) -> dict[str, set[str]]:
+        normalized = normalize_grants(data)
+        grants_path.parent.mkdir(parents=True, exist_ok=True)
+        grants_path.write_text(
+            json.dumps({key: sorted(value) for key, value in normalized.items()},
+                       ensure_ascii=False, indent=2),
+            encoding="utf-8")
+        return normalized
+
+    def _scope_args(identity: Identity) -> tuple[object | None, dict | None]:
+        """回傳 (viewer, grants)；case_scope 未啟用時皆 None（舊行為）。"""
+        if not runtime.case_scope:
+            return None, None
+        return identity, _load_grants()
+
     def _reviewer_account(reviewer_id: str) -> dict:
         """P1-04：指派前對 auth 校驗——賬號須存在、為 reviewer 角色且啓用中。"""
         found = [row for row in auth_store.list_accounts()
@@ -351,6 +383,11 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
     async def case_missing(_request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=404)
 
+    @api.exception_handler(CaseNotVisible)
+    async def case_not_visible(_request, exc):
+        # 個案存在但無權查看：與不存在同樣回 404，避免枚舉。
+        return JSONResponse({"detail": str(exc)}, status_code=404)
+
     @api.exception_handler(Forbidden)
     async def role_denied(_request, exc):
         return JSONResponse({"detail": str(exc)}, status_code=403)
@@ -382,7 +419,8 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
     def cases(limit: int | None = None, offset: int = 0,
               identity: Identity = Depends(_require_identity)):
         # 不帶分頁參數 → 舊形狀（純陣列，相容既有前端）；帶 limit → 分頁對象。
-        result = workspace.list(limit=limit, offset=offset)
+        viewer, grants = _scope_args(identity)
+        result = workspace.list(limit=limit, offset=offset, viewer=viewer, grants=grants)
         if identity.role == "reviewer":
             # 盲評：列表對評審代號化申請人、遮蔽標題身份詞並隱去加權總分。
             from kkg.blind import blind_list_item
@@ -392,7 +430,8 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
 
     @api.get("/api/cases/{case_id}")
     def case(case_id: str, identity: Identity = Depends(_require_identity)):
-        return _blind(workspace.get(case_id)[0], identity)
+        viewer, grants = _scope_args(identity)
+        return _blind(workspace.get(case_id, viewer=viewer, grants=grants)[0], identity)
 
     @api.post("/api/demo")
     def seed(identity: Identity = Depends(_require_role(*ROLE_SUBMIT))):
@@ -491,7 +530,8 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
 
     @api.get("/api/cases/{case_id}/pack")
     def pack(case_id: str, identity: Identity = Depends(_require_identity)):
-        raw_detail, app = workspace.get(case_id)
+        viewer, grants = _scope_args(identity)
+        raw_detail, app = workspace.get(case_id, viewer=viewer, grants=grants)
         detail = _blind(raw_detail, identity)  # P1-04：評審導出的評審包同樣盲評
         # 修復：評審包由 Application 物件另起一份生成，須用原始細節同步盲評，
         # 否則機構名／團隊成員會在 summary/one_pager 重現，繞過 detail 的盲評。
@@ -543,14 +583,16 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
         與 CLI `[7/7]` 共用同一套規則式生成邏輯；輸出已去識別化。這是能力
         可達性端點——Web 操作員無需跑命令列即可查閱五項可追溯模組的結果。
         """
-        raw_detail, _ = workspace.get(case_id)
+        viewer, grants = _scope_args(identity)
+        raw_detail, _ = workspace.get(case_id, viewer=viewer, grants=grants)
         result = workspace.traceability(case_id)
         from kkg.blind import blind_traceability
         return blind_traceability(result, identity, raw_detail)
 
     @api.get("/api/cases/{case_id}/report", response_class=PlainTextResponse)
     def report(case_id: str, identity: Identity = Depends(_require_identity)):
-        detail, app = workspace.get(case_id)
+        viewer, grants = _scope_args(identity)
+        detail, app = workspace.get(case_id, viewer=viewer, grants=grants)
         if detail["assessment"]["status"] != "approved":
             raise HTTPException(409, "請先簽發通過結果。")
         current = detail["project"]
@@ -705,6 +747,27 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
         if identity.role != "admin":
             raise Forbidden("僅管理員可查看賬戶清單。")
         return auth_store.list_accounts()
+
+    @api.get("/api/access/grants")
+    def access_grants(identity: Identity = Depends(_require_identity)):
+        """P0-02/03 骨架：讀取個案級授權表（僅管理員）。"""
+        if identity.role != "admin":
+            raise Forbidden("僅管理員可查看個案授權表。")
+        current = _load_grants() or {}
+        return {"enabled": runtime.case_scope,
+                "mode": "whitelist" if current else "assignment-or-unset",
+                "grants": {key: sorted(value) for key, value in current.items()}}
+
+    @api.put("/api/access/grants")
+    def access_grants_update(data: dict, identity: Identity = Depends(_require_identity)):
+        """管理員設定 ``{帳號: [個案 ID, ...]}``；須同時啟用 GRANTFLOW_CASE_SCOPE 才生效。"""
+        if identity.role != "admin":
+            raise Forbidden("僅管理員可設定個案授權表。")
+        saved = _save_grants(data.get("grants", data))
+        return {"enabled": runtime.case_scope,
+                "grants": {key: sorted(value) for key, value in saved.items()},
+                "note": "授權表已保存；須以 GRANTFLOW_CASE_SCOPE=1 啟動才會過濾。"
+                        if not runtime.case_scope else "授權表已保存並生效。"}
 
     @api.post("/api/auth/disable")
     def auth_disable(data: DisableInput, identity: Identity = Depends(_require_identity)):

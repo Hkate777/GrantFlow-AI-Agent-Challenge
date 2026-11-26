@@ -55,6 +55,8 @@ class RuntimeConfig:
     https_only: bool = False
     # 單機也可明確要求身份綁定（不依賴 remote_access 的隱式條件）。
     enforce_identity: bool = False
+    # 個案級可見性骨架：預設關閉以相容既有資料；啟用後按授權表/指派限制可見個案。
+    case_scope: bool = False
 
     @classmethod
     def from_env(cls) -> "RuntimeConfig":
@@ -73,6 +75,7 @@ class RuntimeConfig:
             public_origins=_env_list("GRANTFLOW_PUBLIC_ORIGINS"),
             https_only=_env_bool("GRANTFLOW_HTTPS_ONLY"),
             enforce_identity=_env_bool("GRANTFLOW_ENFORCE_IDENTITY"),
+            case_scope=_env_bool("GRANTFLOW_CASE_SCOPE"),
         )
 
     @property

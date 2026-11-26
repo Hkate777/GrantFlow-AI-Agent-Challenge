@@ -18,7 +18,7 @@ GrantFlow面向大學、科技園、創投機構及創新創業支援單位，�
 - **真盲評**：評委在簽發前看不到申請人名稱、電郵、團隊與檔名，也看不到他人評分、加權總分與確定性評分聚合；身份以 `Applicant X` 代號呈現（`blind.py`），同一個案始終同一代號，簽發後才解除。
 - **身份詞遮蔽**：身份詞表由完整機構名衍生簡稱別名（「啓明科技有限公司」衍生「啓明科技」「啓明」），並補上繁簡及台灣異體寫法；`project_desc` 等長文本即使只寫簡稱或夾用簡體字也同樣遮蔽，剝離至通用詞即停止，避免誤遮評分正文。盲評覆蓋評委可達的四條路徑：個案詳情、個案列表、評審包導出（ZIP 內 `summary.md`／`one_pager.md`／`findings.json`）與可追溯物料（依據卡來源／合規摘錄），共用同一身份詞表。
 - **衝突比對**：利益衝突由服務端按 `conflict_rules` 關鍵詞與結構化 ID 自動比對，不靠評委看見申請人是誰才申報；申報制作額外一層。測試見 `tests/test_blind_review.py` 與 `tests/test_blind_api_leaks.py`
-- **帳號與權限**：本機帳號、HTTP Basic 與 Bearer 會話雙登入、scrypt 加鹽口令。`/api/auth/login` 簽發有效期 12 小時的 Bearer token（存 `sessions` 表），全局認證同時接受 Bearer 與 Basic；`/api/auth/logout` 可撤銷單一會話即時失效，前端登入後把 token 存於 `sessionStorage` 並提供登出按鈕。Basic 無服務端會話可撤，端點如實回報，不假稱已安全登出。已驗證 Basic 憑據有 5 分鐘記憶體快取避免每請求重算 scrypt，停用帳號時即時清空並撤銷全部工作階段；工作台操作綁定服務端操作員身份；角色權限矩陣（operator 收件、reviewer 評分、approver 簽發、finance 台帳、admin 全部）落實職責分離。此為單機演示級身份，正式對外仍需機構級 OIDC/SSO 與個案級授權。評委提交本人評分走 `POST /scores`，須先獲指派並完成利益申報，服務端按登入帳號綁定；批量 `PUT /scores` 在遠端部署只供經辦與管理員更正，評委不能用它繞過流程（見 `tests/test_bulk_score_bypass.py`）。遠端部署不建立弱口令演示賬號，即使沿用本機資料庫也會自動停用；利益衝突以結構化 ID 比對。
+- **帳號與權限**：本機帳號、HTTP Basic 與 Bearer 會話雙登入、scrypt 加鹽口令。`/api/auth/login` 簽發有效期 12 小時的 Bearer token（存 `sessions` 表），全局認證同時接受 Bearer 與 Basic；`/api/auth/logout` 可撤銷單一會話即時失效，前端登入後把 token 存於 `sessionStorage` 並提供登出按鈕。Basic 無服務端會話可撤，端點如實回報，不假稱已安全登出。已驗證 Basic 憑據有 5 分鐘記憶體快取避免每請求重算 scrypt，停用帳號時即時清空並撤銷全部工作階段；工作台操作綁定服務端操作員身份；角色權限矩陣（operator 收件、reviewer 評分、approver 簽發、finance 台帳、admin 全部）落實職責分離。此為單機演示級身份，正式對外仍需機構級 OIDC/SSO。個案級資料授權已有代碼骨架：設 `GRANTFLOW_CASE_SCOPE=1` 後，管理員可經 `GET/PUT /api/access/grants` 設定「帳號 → 可見個案 ID」白名單，未列的非管理員看不到個案；未設白名單時評委只見被指派的個案，其餘流程角色維持全量（相容舊資料）。這是代碼側骨架，授權表要接機構真實資料才完整；見 `tests/test_case_scope.py`。評委提交本人評分走 `POST /scores`，須先獲指派並完成利益申報，服務端按登入帳號綁定；批量 `PUT /scores` 在遠端部署只供經辦與管理員更正，評委不能用它繞過流程（見 `tests/test_bulk_score_bypass.py`）。遠端部署不建立弱口令演示賬號，即使沿用本機資料庫也會自動停用；利益衝突以結構化 ID 比對。
 - **項目追蹤**：里程碑、資助發放、定期報告跟蹤，撥款合計不得超出核准額度，逾期/臨期自動預警，輸出管理報告
 - **全程可審計**：每個操作寫入審計日誌，需人工複核的節點打 `needs_human` 標記
 - **多地區審查**：內置15個地區（中國香港、中國台灣、中國內地、新加坡、美國、英國、澳洲、加拿大、日本、韓國、阿聯酋、沙特、馬來西亞、泰國、埃及），Agent按地區載入語言字形、當地法規、貨幣格式及評審慣例；法規依據真實法律（UK GDPR、Privacy Act 1988、PIPEDA、PDPL、Law 151/2020 等）
@@ -115,7 +115,7 @@ python scripts/vault_cli.py verify                         # 驗證口令與完�
 python scripts/vault_cli.py keys                           # 列出可用憑據名稱，不注入環境
 ```
 
-Web 工作台提供 `POST /api/security/scan`（規則注入+敏感值偵測）、`POST /api/security/scan-semantic`（詞彙語義分類器＋可選 `use_llm` 專門模型、附說明）、`POST /api/security/review-output`（輸出審查）、`GET /api/security/vault/status`（密鑰環狀態，僅遮蔽值），均受認證保護。語義層亦已接入 `Pipeline.intake()`，CLI 與網頁共用同一套訊號。測試見 `tests/test_security.py`（19 項）、`tests/test_audit_fixes.py`（11 項審查回歸）與 `tests/test_web_traceability.py`（14 項可達性與語義回歸）。
+Web 工作台提供 `POST /api/security/scan`（規則注入+敏感值偵測）、`POST /api/security/scan-semantic`（詞彙語義分類器＋可選 `use_llm` 專門模型、附說明）、`POST /api/security/review-output`（輸出審查）、`GET /api/security/vault/status`（密鑰環狀態，僅遮蔽值），均受認證保護。語義層亦已接入 `Pipeline.intake()`，CLI 與網頁共用同一套訊號。`python scripts/eval_semantic.py [--sweep]` 以固定種子切分留出集，輸出精確率、召回率、誤報率與門檻取捨（JSON）；報告如實標明數字來自演示級種子語料，不得當真實性能引用，真實標註集與偏差評估仍待機構提供。測試見 `tests/test_security.py`（19 項）、`tests/test_audit_fixes.py`（11 項審查回歸）、`tests/test_web_traceability.py`（14 項可達性與語義回歸）與 `tests/test_semantic_eval.py`（5 項評估）。
 
 
 ## 快速開始
@@ -228,6 +228,7 @@ python cli.py --region CN    # 中國內地（簡體，個人信息保護法／�
 | `GRANTFLOW_BAN_MINUTES` | 臨時封鎖分鐘數 | `15` |
 | `GRANTFLOW_PUBLIC_ORIGINS` | 額外允許的寫入 Origin，留空即只容許同源 | 空 |
 | `GRANTFLOW_ENFORCE_IDENTITY` | 單機也啟用完整身份綁定（停用弱口令賬號、收窄批量評分通道） | `false` |
+| `GRANTFLOW_CASE_SCOPE` | 啟用個案級可見性骨架（授權表或評委指派限制） | `false` |
 
 防護要點：
 
@@ -310,10 +311,12 @@ flowchart LR
 │   ├── start.sh                # 一鍵啟動器（local/remote/docker/test）
 │   ├── check_language.py       # 語言規範檢查（預設警告，--strict 嚴格）
 │   ├── benchmark.py            # 量化基準測試：計劃書「可量化成效」
+│   ├── migrate.py              # P0-08：為舊個案補 program_snapshot（預設試算，--apply 寫入）
+│   ├── eval_semantic.py        # 語義分類器留出集評估（種子語料口徑，json 報告）
 │   ├── export_summary.py       # 匯出評審總覽 Excel
 │   ├── vault_cli.py            # 加密密鑰環管理（set/get/list/delete/verify）
 │   └── pitch_demo.py           # 一鍵生成決賽演示全套物料：output/pitch/
-├── tests/                      # 191 項端到端測試（含 19 項安全、11 項部署防護、11 項審查回歸、23 項可追溯）
+├── tests/                      # 257 項端到端測試（含安全、部署防護、審查回歸、可追溯、個案授權、遷移、語義評估）
 ├── TEAM_HANDOFF.md             # 團隊交接説明（現況/歷史線/設計決策/分工）
 └── docs/                       # 架構説明 / 部署指南 / 版本説明 / 評審映射
 ```

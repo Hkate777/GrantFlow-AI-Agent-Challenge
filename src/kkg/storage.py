@@ -43,23 +43,40 @@ class CaseStore:
 
     @staticmethod
     def list(connection: sqlite3.Connection, program_id: str | None = None,
-             limit: int | None = None, offset: int = 0) -> list[dict]:
+             limit: int | None = None, offset: int = 0, *, viewer: object = None,
+             grants: dict | None = None) -> list[dict]:
+        """列出個案。``viewer``/``grants`` 提供時在反序列化後做個案級可見性過濾。
+
+        分頁與過濾的先後：先按可見性篩選，再分頁，確保 review 不會因被過濾掉的
+        個案而出現空頁錯位。未傳 viewer 時維持舊的全量行為。
+        """
+        from .access import can_view_case
+
         query = "SELECT payload FROM cases"
         params: list = []
         if program_id is not None:
             query += " WHERE program_id = ?"
             params.append(program_id)
-        query += " ORDER BY rowid DESC LIMIT ? OFFSET ?"
-        params.extend([-1 if limit is None else limit, offset])
-        return [json.loads(row[0]) for row in connection.execute(query, params)]
+        query += " ORDER BY rowid DESC"
+        rows = [json.loads(row[0]) for row in connection.execute(query, params)]
+        if viewer is not None:
+            rows = [row for row in rows if can_view_case(row, viewer, grants)]
+        if limit is not None:
+            rows = rows[offset:offset + limit]
+        elif offset:
+            rows = rows[offset:]
+        return rows
 
     @staticmethod
-    def count(connection: sqlite3.Connection, program_id: str | None = None) -> int:
-        if program_id is None:
-            row = connection.execute("SELECT COUNT(*) FROM cases").fetchone()
-        else:
-            row = connection.execute("SELECT COUNT(*) FROM cases WHERE program_id = ?", (program_id,)).fetchone()
-        return int(row[0])
+    def count(connection: sqlite3.Connection, program_id: str | None = None, *,
+              viewer: object = None, grants: dict | None = None) -> int:
+        if viewer is None:
+            if program_id is None:
+                row = connection.execute("SELECT COUNT(*) FROM cases").fetchone()
+            else:
+                row = connection.execute("SELECT COUNT(*) FROM cases WHERE program_id = ?", (program_id,)).fetchone()
+            return int(row[0])
+        return len(CaseStore.list(connection, program_id=program_id, viewer=viewer, grants=grants))
 
     @staticmethod
     def find(connection: sqlite3.Connection, program_id: str, app_id: str) -> dict | None:
@@ -68,11 +85,18 @@ class CaseStore:
         return json.loads(row[0]) if row else None
 
     @staticmethod
-    def get(connection: sqlite3.Connection, case_id: str) -> dict:
+    def get(connection: sqlite3.Connection, case_id: str, *, viewer: object = None,
+            grants: dict | None = None) -> dict:
+        from .access import CaseNotVisible, can_view_case
+
         row = connection.execute("SELECT payload FROM cases WHERE id = ?", (case_id,)).fetchone()
         if row is None:
             raise MissingCase("找不到申請個案。")
-        return json.loads(row[0])
+        case = json.loads(row[0])
+        if viewer is not None and not can_view_case(case, viewer, grants):
+            # 個案存在但無權查看：回報「找不到」，避免外界枚舉個案 ID。
+            raise CaseNotVisible("找不到申請個案。")
+        return case
 
     @staticmethod
     def snapshot(connection: sqlite3.Connection, case_id: str) -> dict | None:

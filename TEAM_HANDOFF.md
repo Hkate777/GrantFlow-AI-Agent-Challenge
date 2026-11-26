@@ -68,7 +68,7 @@ git fetch origin; git switch main             # 新工作從 main 開分支
 
 # 依賴：Python 3.11（CI 與本次實測）；opencc 為可選（語言檢查用）
 python -m pip install -r requirements.txt
-python -m pytest tests -q                     # 應 204 passed + 8 skipped（缺 opencc）；vault 權限位 1 項 Windows 環境差異
+python -m pytest tests -q                     # 數字以實際輸出為準；2026-11 基準 257 passed + 2 skipped（skipped 隨 opencc／平台而異）
 python scripts/check_language.py              # 應通過（警告模式）
 
 # Web 工作台（獨立臨時 DB）
@@ -148,7 +148,7 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 
 1. P0 人工項未動（審評清單）：機構 OIDC/SSO、環境分離、收件連接器、備份恢復演練、審計獨立保存。這些是接真實資料前的硬性前置，需機構決策與人工執行。（代碼側的 HTTP Basic 身份與角色矩陣 P0-06/07 已落地，但不替代機構級 OIDC/SSO。）
 2. **分頁的批次檢查僅限當前頁**：跨頁重複檢測需 P1 的持久化佇列/索引改造（`workspace.list` docstring 已注明）。
-3. **舊個案無快照**：`program_snapshot` 自本版起記錄；升級前的歷史資料在配置移除後仍會 422（遷移腳本屬 P0-08）。
+3. **舊個案無快照**：`program_snapshot` 自本版起記錄；升級前的歷史資料在配置移除後仍會 422。已有遷移腳本（`scripts/migrate.py`，見 §8 P0-08），升級前先試算再 `--apply`。
 4. **`auto` 語義已收緊**：原先 auto 會自動用環境裡的外部模型密鑰，現改為恆本地。若有外部調用需求，請顯式 `--llm openai` 等。
 5. **`.venv`（Python 3.13）缺 FastAPI/pytest**：完整測試用系統 Python 3.14；語言檢查用 `.venv`。
 6. **時區近似**：截止比較用服務器本地時區的收件日期；正式機構部署應固定時區政策（審評 P0-05）。
@@ -184,13 +184,13 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 - [x] ~~登入 token 兑現~~：`/api/auth/login` 簽發 Bearer（全局認證已支援），新增 `/api/auth/logout` 撤銷單一會話，前端存 `sessionStorage` 並提供登入／登出；Basic 如實回報無服務端會話可撤。見 `tests/test_auth.py`
 - [x] ~~P0-01 依賴真鎖定~~：`requirements.txt` 改用精確 `==` 版本（實測相容組合），移除不存在的 `httpx2` 幽靈依賴
 - [ ] **審計獨立保存（接真實資助數據前的硬性前置）**：`_event()` 現把 `audit` append 進 `case["audit"]`，與業務資料同一 payload，`storage.update()` 整體覆蓋。有寫權限者能連業務資料一起改掉，做不到獨立、append-only。改法：審計寫獨立只追加表（單獨 DB 或獨立檔案 + 哈希鏈），業務表不再持有它
-- [ ] P0-02/03：機構級 OIDC/SSO 登入 + 個案級授權（代碼側基本身份/角色已備，機構對接仍待）
+- [ ] P0-02/03：機構級 OIDC/SSO 登入 + 個案級授權對接（機構對接仍待）。代碼側骨架已落地：`src/kkg/access.py` 的 `can_view_case` 判定、`storage.py`/`workspace.py` 的 `viewer`/`grants` 過濾、管理員端點 `GET/PUT /api/access/grants`、`GRANTFLOW_CASE_SCOPE` 開關；測試見 `tests/test_case_scope.py`（9 項）。真實授權表須由機構的真實資料填入，骨架本身不提供帳號體系。
 - [ ] P0-05：收件時間/回執正式化（已打地基：`received_at` 服務端記錄）
-- [ ] P0-08：資料遷移腳本（舊個案補 `program_snapshot`）
+- [x] ~~P0-08：資料遷移腳本~~（骨架已落地）：`src/kkg/migrate.py` + `scripts/migrate.py`，為舊個案補 `program_snapshot`；預設試算、`--apply` 才寫入，冪等且不覆蓋既有快照，找不到同名計劃記入 `unresolved` 不臆造。測試見 `tests/test_migration.py`（4 項）。升級前先跑一次試算確認。
 - [ ] P1-05：評委最低人數在**簽發 UI**上的明確提示（後端已擋）
 - [ ] P1-16：真實瀏覽器 E2E 納入 CI
 - [ ] 全流程人工驗收：兩計劃 × 兩渠道、真實 OCR、工時基線
-- [ ] 語義注入分類器真實資料：現用演示級種子語料（TF-IDF 最近鄰），能覆蓋換詞變體但未用真實標註資料重訓、未做偏差／誤報評估；只作人工覆核提示，不自動攔截。對外宣稱偵測能力前須補真實標註集的召回／誤報基線
+- [ ] 語義注入分類器真實資料：現用演示級種子語料（TF-IDF 最近鄰），能覆蓋換詞變體但未用真實標註資料重訓、未做偏差／誤報評估；只作人工覆核提示，不自動攔截。對外宣稱偵測能力前須補真實標註集的召回／誤報基線。評估骨架已落地：`src/kkg/semantic_eval.py` + `scripts/eval_semantic.py` 以固定種子做留出集，輸出精確率／召回率／誤報率與門檻取捨；報告如實標明種子語料口徑，不得當真實性能引用。測試見 `tests/test_semantic_eval.py`（5 項）。
 - [ ] 決定何時把安全/角色/字形/時區/評審工作流改動升版至 v1.2.0（目前維持 v1.1.0，依約不急於發版）
 
 ---
@@ -215,13 +215,16 @@ src/kkg/
   guard.py            安全護欄（注入偵測/輸出審查/不可信資料隔離）
   secrets.py          加密密鑰環（scrypt+HMAC，明文不落盤）
   auth.py             本地賬號 + HTTP Basic + 角色（P0-06/07）
+  access.py           個案級可見性判定（P0-02/03 骨架：授權表／指派）
+  migrate.py          P0-08 舊個案快照遷移（dry-run 預設、冪等）
+  semantic_eval.py    語義分類器留出集評估（種子語料口徑，caveat 隨報告）
   export.py           Excel 匯出
 configs/program_demo.yaml     示範計劃（HK-ACC-2027）
 configs/campus_pilot.yaml     校園試點計劃（第二套規則）
 configs/regions/*.yaml        15 地區配置
 web/                  前端（app.js/index.html/styles.css）
-scripts/              check_language.py / benchmark.py / pitch_demo.py / vault_cli.py
-tests/                191 項測試（含 test_roles/test_security/test_script/test_tracking/test_serve/test_traceability…）
+scripts/              check_language.py / benchmark.py / migrate.py / eval_semantic.py / pitch_demo.py / vault_cli.py
+tests/                257 項測試（含 test_roles/test_security/test_script/test_tracking/test_serve/test_traceability/test_case_scope/test_migration/test_semantic_eval…）
 docs/                 architecture.md / deployment.md / proposal-outline.md / RELEASE_NOTES_v1.0~v1.1
 Dockerfile / docker-compose.yml  非 root 容器、/data 持久卷、健康檢查
 deploy/               fly.toml / render.yaml 雲端部署範例
@@ -231,7 +234,7 @@ deploy/               fly.toml / render.yaml 雲端部署範例
 
 ## 10. 接手第一天建議
 
-1. `git switch main && git pull` → `python -m pytest tests -q`（應 159/159）；異地啟動見 `docs/deployment.md`。
+1. `git switch main && git pull` → `python -m pytest tests -q`（數字以實際輸出為準，見 §3）；異地啟動見 `docs/deployment.md`。
 2. 起 Web 工作台（臨時 DB），用不同角色賬號登入，驗證角色矩陣：operator 可收件但不可簽發、approver 才可簽發、finance 才可動台帳。
 3. 載入示範申請，檢查 002 的「待複議」狀態、評審包導出、字形審計端點 `/api/script/audit` 與安全掃描 `/api/security/scan`。
 4. 讀 [全面審評與改進清單](<C:/Users/25345/Documents/New project/GrantFlow_全面审评与改进清单.md>) 的 P0 表，認領剩餘的人工項（OIDC/SSO、環境分離、備份演練）或 P0-08 遷移腳本。

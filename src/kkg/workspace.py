@@ -175,15 +175,18 @@ class Workspace:
             "project": project_status(*_project(case["project"])), "audit": case["audit"],
         }
 
-    def list(self, *, limit: int | None = None, offset: int = 0) -> dict:
+    def list(self, *, limit: int | None = None, offset: int = 0,
+             viewer: object = None, grants: dict | None = None) -> dict:
         """個案列表。默認全量（舊行為）；傳 limit/offset 時分頁並回傳總數。
 
-        注意：批次檢查（重複/離羣）目前僅對當前頁的個案計算——跨頁查重
-        在大批次場景下需配合 P1 的持久化工作佇列與索引改造。
+        ``viewer``/``grants`` 提供時按個案級可見性過濾（P0-02/03 骨架），
+        先過濾再分頁。注意：批次檢查（重複/離羣）目前僅對當前頁的個案計算
+        ——跨頁查重需配合 P1 的持久化工作佇列與索引改造。
         """
         with self.store.transaction() as connection:
-            records = self.store.list(connection, limit=limit, offset=offset)
-            total = self.store.count(connection)
+            records = self.store.list(connection, limit=limit, offset=offset,
+                                      viewer=viewer, grants=grants)
+            total = self.store.count(connection, viewer=viewer, grants=grants)
         batch = self._batch_findings(records)
         fields = ("id", "channel", "revision", "received_at")
         app_fields = ("app_id", "title", "applicant")
@@ -197,9 +200,11 @@ class Workspace:
             return {"items": items, "total": len(items)}
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
-    def get(self, case_id: str) -> tuple[dict, Application]:
+    def get(self, case_id: str, *, viewer: object = None,
+            grants: dict | None = None) -> tuple[dict, Application]:
         with self.store.transaction() as connection:
-            case = self.store.get(connection, case_id)
+            # 只有目標個案做可見性檢查；批次查找其他個案需全量，否則批處結果會缺失。
+            case = self.store.get(connection, case_id, viewer=viewer, grants=grants)
             records = self.store.list(connection, case["application"]["program"])
         return self._view(case, self._batch_findings(records)), _application(case)
 

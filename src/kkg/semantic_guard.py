@@ -165,18 +165,14 @@ class SemanticSignal:
         }
 
 
-def scan_semantic(text: str, *, threshold: float = 0.55) -> SemanticSignal:
-    """以小型詞彙語義分類器評估文字的注入風險；只回訊號，不改原文、不執行。
-
-    ``score`` 已編碼「注入相似度減正常相似度」的邊際（線性映到 0..1），
-    ``threshold`` 即在該邊際上判定；門檻可調。空白或無詞元文字回 ``unknown``。
-    """
+def score_with_model(text: str, model: _TfidfModel, *, threshold: float = 0.55) -> SemanticSignal:
+    """以指定模型實例評分；``scan_semantic`` 與留出集評估共用同一公式，避免漂移。"""
     if not text or not isinstance(text, str) or not _tokens(text):
         return SemanticSignal(0.0, "unknown", "lexical",
                               note="文字為空或無可分析詞元，未作語義判斷。")
     if not 0.0 < threshold <= 1.0:
         raise ValueError("threshold 必須介於 0 與 1 之間。")
-    inj, ben, matches = _model().similarity(text)
+    inj, ben, matches = model.similarity(text)
     score = max(0.0, min(1.0, (inj - ben + 1.0) / 2.0))
     label = "suspicious" if score >= threshold else "benign"
     return SemanticSignal(
@@ -184,6 +180,15 @@ def scan_semantic(text: str, *, threshold: float = 0.55) -> SemanticSignal:
         tuple(raw for sim, raw in matches if sim > 0.15),
         note="詞彙語義分類器（TF-IDF 餘弦）；" + CAPABILITY_STATEMENT,
     )
+
+
+def scan_semantic(text: str, *, threshold: float = 0.55) -> SemanticSignal:
+    """以小型詞彙語義分類器評估文字的注入風險；只回訊號，不改原文、不執行。
+
+    ``score`` 已編碼「注入相似度減正常相似度」的邊際（線性映到 0..1），
+    ``threshold`` 即在該邊際上判定；門檻可調。空白或無詞元文字回 ``unknown``。
+    """
+    return score_with_model(text, _model(), threshold=threshold)
 
 
 def semantic_findings(signal: SemanticSignal, *, app_id: str = "") -> list[Any]:
