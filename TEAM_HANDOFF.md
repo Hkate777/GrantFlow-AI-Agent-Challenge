@@ -36,7 +36,7 @@ GrantFlow 對應「智賦香江」場景 ⑯「申請評審與項目管理流程
 
 ---
 
-## 2. 歷史線說明（接手必讀，最容易迷惑的部分）
+## 2. 歷史線說明
 
 這個倉庫早期經歷過三條線，現已全部收斂到單一 `main`。接手前請理解拓撲：
 
@@ -97,7 +97,7 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 | 多模型接入（OpenAI/Claude/Gemini） | `EvidenceSpan` 證據結構 + `parse_hkd` 金額解析 |
 | Excel 導出、量化基準、v1.0.0 說明 | 12 個測試檔（含 AppTest 風格的 workspace API 測試） |
 
-融合的關鍵檔案：`review.py`（對方分歧閾值 + 我方校驗/狀態機）、`pipeline.py`（對方 region+隱私 intake + 我方 `errors=` 與 assess）、`check.py`（對方 `check_region` + 我方細化校驗與 `application_ids` 查重）、`app.py`（完整工作台 + 對方地區演示端點）、`cli.py`（對方地區/多模型 + 我方導出修復）、`get_llm`（auto 恆本地）。
+融合涉及的檔案：`review.py`（對方分歧閾值 + 我方校驗/狀態機）、`pipeline.py`（對方 region+隱私 intake + 我方 `errors=` 與 assess）、`check.py`（對方 `check_region` + 我方細化校驗與 `application_ids` 查重）、`app.py`（完整工作台 + 對方地區演示端點）、`cli.py`（對方地區/多模型 + 我方導出修復）、`get_llm`（auto 恆本地）。
 
 ### 4.2 四個實測缺陷修復（各帶回歸測試，`tests/test_review_fixes.py`）
 
@@ -110,7 +110,7 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 
 ---
 
-## 5. 接手必讀：六個關鍵設計決策
+## 5. 六個設計決策
 
 1. **人工簽發原則**：`assess()` 的 `notice` 恆為 `None`，正式通知只在工作台簽發時生成（`result_notice`）；CLI/導出寫的是 `review_draft()` 評審進度草稿。任何改動不得讓系統自動出正式通知。
 2. assess 的 holds 順序即狀態語義：`pending_deliberation → needs_materials → needs_compliance → invalid_scores → pending_assignment → pending_scores → insufficient_reviews → needs_review`；`status = holds[0]`。調整順序會改變個案首選狀態與測試（P1-04 把「待指派評審」插在「待評分」之前。指派是評分的前置條件，但排在材料/資格/複議之後；`pending_assignment` 亦列入程序性 holds，不可否決）。
@@ -144,7 +144,7 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 
 ---
 
-## 7. 已知風險與限制（如實）
+## 7. 已知風險與限制
 
 1. P0 人工項未動（審評清單）：機構 OIDC/SSO、環境分離、收件連接器、備份恢復演練、審計獨立保存。這些是接真實資料前的硬性前置，需機構決策與人工執行。（代碼側的 HTTP Basic 身份與角色矩陣 P0-06/07 已落地，但不替代機構級 OIDC/SSO。）
 2. **分頁的批次檢查僅限當前頁**：跨頁重複檢測需 P1 的持久化佇列/索引改造（`workspace.list` docstring 已注明）。
@@ -159,7 +159,16 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 
 `src/kkg/serve.py` 集中管理部署配置：本機預設只聽 loopback；設 `GRANTFLOW_HOST=0.0.0.0` 才接受遠端。`app.py` 的中間件加入每地址滑動窗口限流、連續認證失敗臨時封鎖、Host/Origin/CIDR 約束、請求大小上限與安全響應頭；`output/security.log` 只記事件、地址、路徑與狀態碼，不含憑據。健康端點 `/healthz`、`/readyz` 供容器與負載均衡器使用。`scripts/start.sh` 提供 local/remote/docker/test 四種模式；Fly.io 與 Render 範例在 `deploy/`。反向代理必須設 `GRANTFLOW_TRUST_PROXY=true`，並把 Host、X-Forwarded-* 正確轉發；直接對外則保持 `false`。詳情見 `docs/deployment.md`。
 
-**外部審查回饋整改（P1）**：`output_gate.py` 已把「輸出閘門」從文件變成實際呼叫點（Web/CLI 包、Excel、通知）；注入掃描移到模型呼叫之前，並明確標示「規則＋啟發式、不保證攔截」；`ReviewScore.reviewer_id` 與 `Finding.subject_id` 落實身份綁定與結構化衝突比對；`pipeline.intake()` 不再 `restore()` 明文；私隱正則加入 Luhn 與身份/護照語境；Basic 憑據短時快取但仍即時撤銷；密鑰環不再注入環境變數；遠端模式停用演示弱口令；`decline_allowed` 修復「缺材料不能否決」；基準報告標示 Mock 口徑限制。回歸測試見 `tests/test_audit_fixes.py`。
+**外部審查回饋整改（P1）**：
+
+1. `output_gate.py` 把「輸出閘門」從文件變成實際呼叫點（Web/CLI 包、Excel、通知）。
+2. 注入掃描移到模型呼叫之前，標示「規則＋啟發式、不保證攔截」。
+3. `ReviewScore.reviewer_id` 與 `Finding.subject_id` 落實身份綁定與結構化衝突比對。
+4. `pipeline.intake()` 不再 `restore()` 明文；私隱正則加入 Luhn 與身份/護照語境。
+5. Basic 憑據短時快取但即時撤銷；密鑰環不再注入環境變數；遠端模式停用演示弱口令。
+6. `decline_allowed` 修復「缺材料不能否決」；基準報告標示 Mock 口徑限制。
+
+回歸測試見 `tests/test_audit_fixes.py`。
 
 **可追溯與質量閉環（本次新增）**：`guard.build_ledger/check_ledger` 以可信數字台賬攔截通知中的金額/分數幻覺（年份與≤30序數豁免，接入 `output_gate.gate_text` 與簽發通知）；`explain.evidence_for` 由 Finding 規則生成依據卡（原始出處/排序/理由，零 LLM、零新數字，缺失走 imputed）；`scoring.validate_weights` strict 要求和為 1.0、relative 相容 3/3/2/2，`deterministic_score` 缺維度不補零；`eval_traces` 三項零成本規則判據 + 可選 Judge（失敗不影響規則）；`compliance.classify` refuse/degrade/note 三級 + 法規依據 + 「未命中不代表合規」聲明；`decision_journal` 記錄 LLM 判定並按模型拆分回看準確率。`Pipeline.traceability()` 供 Web/CLI 共用，CLI `[7/7]` 寫出 `output/traceability/`。回歸測試見 `tests/test_traceability.py`（23 項）。
 
@@ -174,7 +183,7 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 - [x] ~~P1-04 評審指派 / 獨立提交 / 利益申報 / 盲評~~（已落地；`tests/test_assignments.py`，見頭部最新進度 2026-11-22）
 - [x] ~~登入 token 兑現~~：`/api/auth/login` 簽發 Bearer（全局認證已支援），新增 `/api/auth/logout` 撤銷單一會話，前端存 `sessionStorage` 並提供登入／登出；Basic 如實回報無服務端會話可撤。見 `tests/test_auth.py`
 - [x] ~~P0-01 依賴真鎖定~~：`requirements.txt` 改用精確 `==` 版本（實測相容組合），移除不存在的 `httpx2` 幽靈依賴
-- [ ] **審計獨立保存（接真實資助數據前的硬性前置）**：`_event()` 現把 `audit` append 進 `case["audit"]`，與業務資料同一 payload，`storage.update()` 整體覆蓋——有寫權限者能連業務資料一起改掉，做不到獨立、append-only。改法：審計寫獨立只追加表（單獨 DB 或獨立檔案 + 哈希鏈），業務表不再持有它
+- [ ] **審計獨立保存（接真實資助數據前的硬性前置）**：`_event()` 現把 `audit` append 進 `case["audit"]`，與業務資料同一 payload，`storage.update()` 整體覆蓋。有寫權限者能連業務資料一起改掉，做不到獨立、append-only。改法：審計寫獨立只追加表（單獨 DB 或獨立檔案 + 哈希鏈），業務表不再持有它
 - [ ] P0-02/03：機構級 OIDC/SSO 登入 + 個案級授權（代碼側基本身份/角色已備，機構對接仍待）
 - [ ] P0-05：收件時間/回執正式化（已打地基：`received_at` 服務端記錄）
 - [ ] P0-08：資料遷移腳本（舊個案補 `program_snapshot`）

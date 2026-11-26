@@ -5,7 +5,7 @@
 場景16的核心挑戰：**各計劃要求、格式、準則各異；材料結構化與非結構化混雜；需支持評審、決策與後續管理全流程**。GrantFlow的三條設計原則：
 
 1. **規則外置**：計劃差異收斂到YAML聲明式配置（`configs/`），代碼零改動適配新計劃。
-2. **人機協同**：Agent只做「檢查與建議」，淘汰/迴避/複議等關鍵決策必須人工確認（`needs_human` 標記貫穿全鏈路）。
+2. **人機協同**：Agent只做「檢查與建議」，淘汰/迴避/複議必須人工確認（`needs_human` 標記貫穿全鏈路）。
 3. **可復現可審計**：MockLLM保證離線確定性；AuditTrail記錄每個動作與依據。
 
 ### 與場景16官方功能要求的逐條對照
@@ -28,7 +28,7 @@
 
 ### 核心 Agent（七步流水線）
 
-| 模塊 | 職責 | 關鍵設計 |
+| 模塊 | 職責 | 要點 |
 |---|---|---|
 | `ingest.py` | 多格式解析 | 每種格式獨立解析器；依賴可選、失敗不中斷（`error` 字段） |
 | `extract.py` | LLM 結構化抽取 | JSON 輸出 + 解析容錯降級；Mock/真實 LLM 同接口 |
@@ -43,7 +43,7 @@
 
 ### 支撐層（工作台、持久化、安全、編排）
 
-| 模塊 | 職責 | 關鍵設計 |
+| 模塊 | 職責 | 要點 |
 |---|---|---|
 | `pipeline.py` | 批次編排 | 階段式 Agentic Workflow，全程 AuditTrail |
 | `workspace.py` | 個案生命週期 | 收件/補件/評分/複議/人工簽發/資助台帳；版本號防衝突；程序快照隨案 |
@@ -53,11 +53,11 @@
 | `llm.py` | LLM 抽象 | Protocol 接口；Mock/OpenAI 兼容/Anthropic/Gemini；`auto` 恆本地 |
 | `privacy.py` | 私隱去識別化 | 送模型前遮蔽 PII，隨機 salt 防跨請求關聯，輸出閘門 `ensure_safe_output` |
 | `guard.py` | 安全護欄 | 規則式提示注入偵測（只標記不執行）、隔離包裝 `wrap_untrusted`/`harden_prompt`、輸出審查 `review_output`、數字台賬 `build_ledger`/`check_ledger` 防幻覺 |
-| `semantic_guard.py` | 語義注入偵測 | 純 Python TF-IDF 最近鄰詞彙語義分類器（離線確定、零外部依賴）補規則認不出的改寫；可選 LLM 專門模型 `llm_semantic_scan`（Mock 如實降級）；只標記需人工覆核，附能力邊界聲明 |
+| `semantic_guard.py` | 語義注入偵測 | 純 Python TF-IDF 最近鄰詞彙語義分類器（離線確定、零外部依賴）補規則認不出的改寫；可選 LLM 專門模型 `llm_semantic_scan`（Mock 如實降級）；只標記需人工覆核，附說明 |
 | `explain.py` | 確定性依據卡 | 由 Finding 規則生成「原始出處／排序／理由」，零 LLM、零新數字；缺失值走 `imputed` 標記 |
 | `scoring.py` | 確定性評分 | 權重和 strict 必須 1.0／relative 雙模式；逐步貢獻可稽核；缺維度不補零 |
 | `eval_traces.py` | Trace 評測 | 引用完整性／來源多樣性／判定留痕三項零成本規則判據；可選 Judge 失敗不影響規則 |
-| `compliance.py` | 合規分級 | refuse/degrade/note 三級 + 法規依據 + 「未命中不代表合規」能力邊界聲明 |
+| `compliance.py` | 合規分級 | refuse/degrade/note 三級 + 法規依據 + 「未命中不代表合規」說明 |
 | `decision_journal.py` | 決策品質 | 結構化 LLM 判定、N 天回看對帳、按模型準確率（未覆核不進分母） |
 | `secrets.py` | 加密密鑰環 | scrypt 派生 + HMAC 串流加密 + encrypt-then-MAC；明文不落盤、清單僅遮蔽值 |
 | `script.py` | 字形標準化 | OpenCC 逐處定位、香港標準字白名單、冪等轉換 |
@@ -98,21 +98,31 @@ submit（表單/.eml/資料夾）→ 建立個案（含計劃快照 + 服務端�
 
 每次操作都做版本號檢查（`revision`），過期操作被拒絕；`_evaluate` 對已簽發個案直接回傳簽發時的 assessment 與 findings，保證歷史結果不隨規則更新而漂移。
 
-**安全閘門（貫穿兩個入口）**：申請內容一律視為不可信輸入。`intake` 在**任何模型呼叫之前**先做兩層偵測：① `guard.scan_prompt_injection` 規則＋結構化啟發式認已知特徵；② `semantic_guard.scan_semantic` 純 Python TF-IDF 最近鄰詞彙語義分類器補「換詞不換義」的改寫（命中轉 `FindingType.SECURITY`，`needs_human=True`，只記分數、相近樣本與已去識別化摘錄，絶不執行內容）。`POST /api/security/scan-semantic` 另提供可選 `use_llm` 專門模型（`llm_semantic_scan`，Mock 如實回 `unavailable`）。三層皆**只提示、不自動攔截或放行、不保證攔截所有注入**；語義層能力邊界（詞彙語義非語意理解）必須隨結果呈現。送模型前 `privacy.Redactor` 去識別化、`guard.wrap_untrusted` 隔離包裹、`harden_prompt` 附加最高優先隔離宣告；模型輸出經 `guard.review_output` 審查，可疑即整批不採用。MockLLM 不發出模型請求，但掃描與對外閘門照樣執行。抽取結果不再 `restore()` 回明文，交叉驗證使用去識別化視圖。
+**安全閘門（貫穿兩個入口）**：申請內容一律視為不可信輸入。`intake` 在任何模型呼叫之前先做兩層偵測：
 
-**對外物料出口**：`output_gate.py` 是 `ensure_safe_output()` 的實際呼叫點——Web 評審包、CLI 評審包、Excel 總表與結果通知必經該層，命中類型與次數寫入 `gate_report.json`。結果通知另以 `build_ledger(app, assessment, budget_cap)` 建立可信數字台賬，`gate_text(ledger=...)` 檢查通知中台賬外的金額／分數並記入 `數字幻覺` 統計與審計事件。身份方面，Basic 已驗證憑據有短時記憶體快取（停用即清空）；遠端模式停用弱口令演示賬號，評分身份綁定登入帳號，利益衝突以 `subject_id`/`reviewer_id` 結構化比對（舊記錄回退至姓名正規化）。API 憑據由 `secrets.SecretVault` 加密存放，`llm._key()` 優先環境變數、其次密鑰環；明文不進日誌、不落盤，也**不再注入 `os.environ`**。
+1. `guard.scan_prompt_injection`：規則＋結構化啟發式認已知特徵；
+2. `semantic_guard.scan_semantic`：純 Python TF-IDF 最近鄰詞彙語義分類器補「換詞不換義」的改寫；命中轉 `FindingType.SECURITY`，`needs_human=True`，只記分數、相近樣本與已去識別化摘錄，內容不執行。
 
-**可追溯鏈（Finding → 依據卡 → 評測 → 決策品質）**：`Pipeline.traceability()` 把每條 Finding 轉為 `explain.EvidenceCard`（原始出處／排序／規則理由，零 LLM），`eval_traces.rule_checks()` 對卡片做引用完整性／來源多樣性／判定留痕三項零成本檢查（LLM-as-Judge 僅附加、失敗不影響規則），`compliance.classify()` 給出 refuse/degrade/note 三級合規分級（每條帶法規依據並附「未命中不代表合規」聲明），`scoring.deterministic_score()` 提供可稽核的確定性評分（缺維度不補零），`decision_journal` 持久化判定並支援 N 天回看與按模型準確率。CLI 在 `[7/7]` 把全部物料寫入 `output/traceability/`；Web 則由 `Workspace.traceability()` 從已入庫個案即時重建同一套物料，經 `GET /api/cases/{id}/traceability` 回傳（輸出閘門去識別化），前端「可追溯」分頁直接呈現。兩條入口共用 `Pipeline.traceability()`，**不是只有 CLI 離線物料**；全部為規則式、可重現，是「可驗證／可解釋」的落實而非文件口號。
+`POST /api/security/scan-semantic` 另提供可選 `use_llm` 專門模型（`llm_semantic_scan`，Mock 回 `unavailable`）。三層皆只提示、不自動攔截或放行、不保證攔截所有注入；語義層說明（詞彙語義非語意理解）隨結果呈現。送模型前 `privacy.Redactor` 去識別化、`guard.wrap_untrusted` 隔離包裹、`harden_prompt` 附加最高優先隔離宣告；模型輸出經 `guard.review_output` 審查，可疑即整批不採用。MockLLM 不發出模型請求，但掃描與對外閘門照樣執行。抽取結果不再 `restore()` 回明文，交叉驗證使用去識別化視圖。
+
+**對外物料出口**：
+
+1. 輸出：Web 評審包、CLI 評審包、Excel 總表與結果通知都經 `output_gate.py` 呼叫 `ensure_safe_output()`，命中類型與次數寫入 `gate_report.json`。
+2. 數字：結果通知以 `build_ledger(app, assessment, budget_cap)` 建立可信數字台賬，`gate_text(ledger=...)` 檢查台賬外的金額／分數並記入 `數字幻覺` 統計與審計事件。
+3. 身份：Basic 已驗證憑據有短時記憶體快取（停用即清空）；遠端模式停用弱口令演示賬號，評分身份綁定登入帳號，利益衝突以 `subject_id`/`reviewer_id` 結構化比對（舊記錄回退至姓名正規化）。
+4. 密鑰：API 憑據由 `secrets.SecretVault` 加密存放，`llm._key()` 優先環境變數、其次密鑰環；明文不進日誌、不落盤，也不注入 `os.environ`。
+
+**可追溯鏈（Finding → 依據卡 → 評測 → 決策品質）**：`Pipeline.traceability()` 把每條 Finding 轉為 `explain.EvidenceCard`（原始出處／排序／規則理由，零 LLM），`eval_traces.rule_checks()` 對卡片做引用完整性／來源多樣性／判定留痕三項零成本檢查（LLM-as-Judge 僅附加、失敗不影響規則），`compliance.classify()` 給出 refuse/degrade/note 三級合規分級（每條帶法規依據並附「未命中不代表合規」聲明），`scoring.deterministic_score()` 提供可稽核的確定性評分（缺維度不補零），`decision_journal` 持久化判定並支援 N 天回看與按模型準確率。CLI 在 `[7/7]` 把全部物料寫入 `output/traceability/`；Web 則由 `Workspace.traceability()` 從已入庫個案即時重建同一套物料，經 `GET /api/cases/{id}/traceability` 回傳（輸出閘門去識別化），前端「可追溯」分頁直接呈現。兩條入口共用 `Pipeline.traceability()`，CLI 離線物料與 Web 物料來自同一套規則；全部規則式、可重現，都落到了代碼裡。
 
 ## 4. 多地區審查
 
 Region模型以yaml描述各地語言、法規、格式及評審慣例。Pipeline接受region參數，intake階段執行check_region，輸出語言一致性、法規關鍵詞、本地用語與貨幣格式的提示。CLI以`--region`切換，Web面板提供下拉選單；新增地區只需加入一份yaml。
 
-**與場景16的關係**：場景16指出「各計劃的申請文件要求、提交格式、評審準則及資格條件均不相同」。大學、科技園及資助機構受理的計劃往往來自不同國家與地區，其申請語文、私隱法規與文件格式各異。多地區能力正是「個別計劃要求各不相同」在跨境與多語境下的延伸——它讓同一套Agent按計劃來源地切換審查視角，仍服務於「完整性與合規性檢查」這一核心要求，而非獨立的出海工具。
+**與場景16的關係**：場景16指出「各計劃的申請文件要求、提交格式、評審準則及資格條件均不相同」。大學、科技園及資助機構受理的計劃往往來自不同國家與地區，其申請語文、私隱法規與文件格式各異。多地區能力是「個別計劃要求各不相同」在跨境與多語境下的延伸。它讓同一套Agent按計劃來源地切換審查視角，服務於「完整性與合規性檢查」。
 
 目前配置15個地區：中國香港(HK)、中國台灣(TW)、中國內地(CN)、新加坡(SG)、美國(US)、英國(GB)、澳洲(AU)、加拿大(CA)、日本(JP)、韓國(KR)、阿聯酋(AE)、沙特(SA)、馬來西亞(MY)、泰國(TH)、埃及(EG)。
 
-**地區時區**：每份地區配置含 `timezone`（IANA 時區，如香港 `Asia/Hong_Kong`、紐約 `America/New_York`）。同一瞬間各地日期可能不同，追蹤模組（里程碑到期、撥款/報告的「確認日期不可晚於今天」）一律以地區當地今天判斷，而非執行機器的本地時間——例如香港已 11-21 而紐約仍 11-20 時，兩地對各類確認日期的判定各自正確。Pipeline 追蹤階段傳入 `region.timezone`，Web/CLI 若處理含時區標記的舊個案則自動從記錄推斷；缺 tzdata 時安全降級到機器本地日期。此能力確保 agent 面對跨境申請時日期語義與地區一致。
+**地區時區**：每份地區配置含 `timezone`（IANA 時區，如香港 `Asia/Hong_Kong`、紐約 `America/New_York`）。同一瞬間各地日期可能不同，追蹤模組（里程碑到期、撥款/報告的「確認日期不可晚於今天」）一律以地區當地今天判斷，而非執行機器的本地時間。例如香港已 11-21 而紐約仍 11-20 時，兩地對各類確認日期的判定各自正確。Pipeline 追蹤階段傳入 `region.timezone`，Web/CLI 若處理含時區標記的舊個案則自動從記錄推斷；缺 tzdata 時安全降級到機器本地日期。此能力確保 agent 面對跨境申請時日期語義與地區一致。
 
 選地覆蓋機構常見的資助計劃來源地，按語系與合規框架歸類：
 
@@ -145,7 +155,7 @@ pending_deliberation（待複議）
 
 調整順序會改變個案首選狀態與測試，必須同步更新。無 holds 時狀態為 `awaiting_decision`（待簽發），此時才允許人工簽發。
 
-**六條關鍵契約**：
+**六條契約**：
 
 1. **通知由人簽發**：`assess()` 的 `notice` 恆為 `None`；CLI/Excel 寫的是 `review_draft()` 評審進度草稿，正式通知只在 `workspace.sign()` 時生成。
 2. **截止以收件時間為準**：用服務端 `received_at` 對比計劃截止日，不採信申請人自報的 `submitted_at`，逾期申請阻斷簽發。
