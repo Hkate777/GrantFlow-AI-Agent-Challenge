@@ -140,3 +140,15 @@ def test_grants_endpoint_requires_admin(tmp_path):
     client = _client(tmp_path, case_scope=True)
     assert client.get("/api/access/grants", headers=_headers("demo")).status_code == 403
     assert client.put("/api/access/grants", json={"grants": {}}, headers=_headers("demo")).status_code == 403
+
+
+def test_auth_me_reports_case_scope_without_leaking_case_counts(tmp_path):
+    """前端據此在零可見個案時給出授權排查提示；只回開關，不回個案存在性。"""
+    off = _client(tmp_path / "off", case_scope=False)
+    body = off.get("/api/auth/me", headers=_headers("demo")).json()
+    assert body["case_scope"] is False
+    on = _client(tmp_path / "on", case_scope=True)
+    body = on.get("/api/auth/me", headers=_headers("demo")).json()
+    assert body["case_scope"] is True
+    assert body["role"] == "operator"
+    assert "visible_cases" not in body and "total" not in body

@@ -363,6 +363,7 @@ function registerRows(target, count) {
   if (!records.length) {
     const empty = !state.cases.length;
     const filtered = Boolean(state.query || state.statusFilter || state.programFilter || state.queue !== "all");
+    const scoped = empty && Boolean(state.me?.case_scope) && state.me.role !== "admin";
     const actions = el("div", "actions");
     if (empty) {
       actions.append(link("新增申請", "#/new", "button primary", "plus"), button("匯入示範個案", importDemo));
@@ -380,8 +381,10 @@ function registerRows(target, count) {
       }));
     }
     target.replaceChildren(el("div", "empty-state", el("span", "empty-icon", icon("tray")),
-      el("h2", "", empty ? "登記冊未有個案" : "沒有符合條件的個案"),
-      el("p", "muted", empty ? "可用表單錄入一宗申請，或匯入一封已儲存的電郵。" : "請調整搜尋字詞或篩選條件。"), actions));
+      el("h2", "", scoped ? "目前沒有可見個案" : empty ? "登記冊未有個案" : "沒有符合條件的個案"),
+      el("p", "muted", scoped
+        ? "若機構已啟用個案級授權，請確認本帳號已列入授權表或已獲指派個案；你無權查看的個案不會在此顯示。"
+        : empty ? "可用表單錄入一宗申請，或匯入一封已儲存的電郵。" : "請調整搜尋字詞或篩選條件。"), actions));
     return;
   }
   const rows = records.map((record) => {

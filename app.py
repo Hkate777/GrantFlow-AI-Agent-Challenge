@@ -727,7 +727,10 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
         return {"account_id": identity.account_id, "display_name": identity.display_name,
                 "role": identity.role, "auth_method": method,
                 "demo_mode": not api.state.runtime.strict_identity,
-                "identity_enforced": api.state.runtime.strict_identity}
+                "identity_enforced": api.state.runtime.strict_identity,
+                # 前端據此在「零可見個案」時給出授權排查提示；只回開關狀態，
+                # 不回個案總數或任何存在性資訊，避免枚舉。
+                "case_scope": api.state.runtime.case_scope}
 
     @api.post("/api/auth/login")
     def login(data: LoginInput):
