@@ -461,8 +461,10 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
         raw_revision = options["revision"]
         if not isinstance(raw_revision, str) or not raw_revision.isdecimal() or len(raw_revision) > 12:
             raise ValueError("缺少有效的個案版本。")
+        viewer, grants = _scope_args(identity)
         return await run_in_threadpool(workspace.amend, case_id, int(raw_revision),
-                                       identity.display_name, metadata, files, options["removed"])
+                                       identity.display_name, metadata, files, options["removed"],
+                                       viewer=viewer, grants=grants)
 
     @api.put("/api/cases/{case_id}/scores")
     def score(case_id: str, data: ScoresInput, identity: Identity = Depends(_require_identity)):
@@ -486,27 +488,35 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
             payload["reviewer_id"] = (identity.account_id if remote else
                                       (row.reviewer_id or identity_key(row.reviewer)))
             rows.append(ReviewScore(**payload))
-        return workspace.score(case_id, data.revision, rows, identity.display_name)
+        viewer, grants = _scope_args(identity)
+        return workspace.score(case_id, data.revision, rows, identity.display_name,
+                               viewer=viewer, grants=grants)
 
     @api.post("/api/cases/{case_id}/scores")
     def score_own(case_id: str, data: OwnScoreInput,
                   identity: Identity = Depends(_require_role(*ROLE_SCORES))):
         # P1-04：評審本人獨立提交——服務端強制評委名/賬號綁定，按 reviewer_id upsert；
         # 須先獲指派並完成利益申報，申報衝突迴避者拒收。
+        viewer, grants = _scope_args(identity)
         return _blind(workspace.score_own(case_id, data.revision, identity.account_id,
-                                          identity.display_name, data.criteria, data.comment), identity)
+                                          identity.display_name, data.criteria, data.comment,
+                                          viewer=viewer, grants=grants), identity)
 
     @api.post("/api/cases/{case_id}/assignments")
     def assign(case_id: str, data: AssignInput, identity: Identity = Depends(_require_role(*ROLE_ASSIGN))):
         account = _reviewer_account(data.reviewer_id)
+        viewer, grants = _scope_args(identity)
         return workspace.assign(case_id, data.revision, identity.display_name,
-                                account["id"], account["display_name"])
+                                account["id"], account["display_name"],
+                                viewer=viewer, grants=grants)
 
     @api.post("/api/cases/{case_id}/conflict")
     def declare_conflict(case_id: str, data: ConflictInput,
                          identity: Identity = Depends(_require_role(*ROLE_SCORES))):
+        viewer, grants = _scope_args(identity)
         return _blind(workspace.declare(case_id, data.revision, identity.account_id,
-                                        identity.display_name, data.has_conflict, data.note), identity)
+                                        identity.display_name, data.has_conflict, data.note,
+                                        viewer=viewer, grants=grants), identity)
 
     @api.get("/api/reviewers")
     def reviewers(identity: Identity = Depends(_require_role(*ROLE_ASSIGN))):
@@ -517,16 +527,22 @@ def create_app(database: str | Path | None = None, configs: Path | None = None,
 
     @api.post("/api/cases/{case_id}/resolution")
     def resolve(case_id: str, data: ResolutionInput, identity: Identity = Depends(_require_role(*ROLE_RESOLVE))):
-        return workspace.resolve(case_id, data.revision, identity.display_name, data.reason)
+        viewer, grants = _scope_args(identity)
+        return workspace.resolve(case_id, data.revision, identity.display_name, data.reason,
+                                 viewer=viewer, grants=grants)
 
     @api.post("/api/cases/{case_id}/decision")
     def sign(case_id: str, data: DecisionInput, identity: Identity = Depends(_require_role(*ROLE_SIGN))):
-        return workspace.sign(case_id, data.revision, identity.display_name, data.reason, data.outcome)
+        viewer, grants = _scope_args(identity)
+        return workspace.sign(case_id, data.revision, identity.display_name, data.reason, data.outcome,
+                              viewer=viewer, grants=grants)
 
     @api.put("/api/cases/{case_id}/project")
     def project(case_id: str, data: ProjectInput, identity: Identity = Depends(_require_role(*ROLE_PROJECT))):
+        viewer, grants = _scope_args(identity)
         return workspace.track(case_id, data.revision, identity.display_name,
-                               data.model_dump(exclude={"revision", "actor"}))
+                               data.model_dump(exclude={"revision", "actor"}),
+                               viewer=viewer, grants=grants)
 
     @api.get("/api/cases/{case_id}/pack")
     def pack(case_id: str, identity: Identity = Depends(_require_identity)):

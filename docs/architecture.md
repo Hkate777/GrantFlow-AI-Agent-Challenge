@@ -109,7 +109,7 @@ submit（表單/.eml/資料夾）→ 建立個案（含計劃快照 + 服務端�
 
 1. 輸出：Web 評審包、CLI 評審包、Excel 總表與結果通知都經 `output_gate.py` 呼叫 `ensure_safe_output()`，命中類型與次數寫入 `gate_report.json`。
 2. 數字：結果通知以 `build_ledger(app, assessment, budget_cap)` 建立可信數字台賬，`gate_text(ledger=...)` 檢查台賬外的金額／分數並記入 `數字幻覺` 統計與審計事件。
-3. 身份：Basic 已驗證憑據有短時記憶體快取（停用即清空）；遠端模式停用弱口令演示賬號，評分身份綁定登入帳號，利益衝突以 `subject_id`/`reviewer_id` 結構化比對（舊記錄回退至姓名正規化）。
+3. 身份：Basic 已驗證憑據有短時記憶體快取（停用即清空）；遠端模式停用弱口令演示賬號，評分身份綁定登入帳號，利益衝突以 `subject_id`/`reviewer_id` 結構化比對（舊記錄回退至姓名正規化）。個案級可見性（`access.can_view_case`）同時約束讀寫：`storage.get/list` 與 `workspace._edit()` 皆帶 `viewer`/`grants`，八個寫端點共用同一閘門；`GRANTFLOW_CASE_SCOPE=1` 才啟用，白名單模式對所有非管理員角色生效。
 4. 密鑰：API 憑據由 `secrets.SecretVault` 加密存放，`llm._key()` 優先環境變數、其次密鑰環；明文不進日誌、不落盤，也不注入 `os.environ`。
 
 **可追溯鏈（Finding → 依據卡 → 評測 → 決策品質）**：`Pipeline.traceability()` 把每條 Finding 轉為 `explain.EvidenceCard`（原始出處／排序／規則理由，零 LLM），`eval_traces.rule_checks()` 對卡片做引用完整性／來源多樣性／判定留痕三項零成本檢查（LLM-as-Judge 僅附加、失敗不影響規則），`compliance.classify()` 給出 refuse/degrade/note 三級合規分級（每條帶法規依據並附「未命中不代表合規」聲明），`scoring.deterministic_score()` 提供可稽核的確定性評分（缺維度不補零），`decision_journal` 持久化判定並支援 N 天回看與按模型準確率。CLI 在 `[7/7]` 把全部物料寫入 `output/traceability/`；Web 則由 `Workspace.traceability()` 從已入庫個案即時重建同一套物料，經 `GET /api/cases/{id}/traceability` 回傳（輸出閘門去識別化），前端「可追溯」分頁直接呈現。兩條入口共用 `Pipeline.traceability()`，CLI 離線物料與 Web 物料來自同一套規則；全部規則式、可重現，都落到了代碼裡。

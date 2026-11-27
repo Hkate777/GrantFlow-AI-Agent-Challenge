@@ -32,6 +32,7 @@
 | `GRANTFLOW_AUTH_FAIL_LIMIT` | 連續 401/403 達此數即封鎖 | `10` |
 | `GRANTFLOW_BAN_MINUTES` | 封鎖持續分鐘數 | `15` |
 | `GRANTFLOW_PUBLIC_ORIGINS` | 額外允許的寫入 Origin；留空即只接受同源 | 空 |
+| `GRANTFLOW_CASE_SCOPE` | 設為 `1` 才啟用個案級授權（讀寫皆過濾）；不設則授權表等於未啟用 | `false` |
 
 數值變數會被夾在合理範圍內，例如連線埠限制在 1 至 65535，避免誤設造成服務異常。
 

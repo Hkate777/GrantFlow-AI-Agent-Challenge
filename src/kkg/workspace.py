@@ -279,9 +279,12 @@ class Workspace:
                     added += 1
         return added
 
-    def _edit(self, case_id: str, revision: int, operation, *, post_award: bool = False) -> dict:
+    def _edit(self, case_id: str, revision: int, operation, *, post_award: bool = False,
+              viewer: object = None, grants: dict | None = None) -> dict:
+        # 寫操作強制過可見性閘門：viewer/grants 由 API 層按服務端身份構造。
+        # 下沉到此處而非逐端點呼叫，避免日後新增寫端點時忘記接線而再次寫穿。
         with self.store.transaction(write=True) as connection:
-            case = self.store.get(connection, case_id)
+            case = self.store.get(connection, case_id, viewer=viewer, grants=grants)
             if case["revision"] != revision:
                 raise WorkspaceConflict("此個案已更新。請重新載入後再操作。")
             if case["decision"] and not post_award:
@@ -297,7 +300,8 @@ class Workspace:
             return self._view(case, self._batch_findings(records))
 
     def amend(self, case_id: str, revision: int, actor: str, metadata: dict,
-              files: list[tuple[str, bytes]], removed: list[str]) -> dict:
+              files: list[tuple[str, bytes]], removed: list[str], *,
+              viewer: object = None, grants: dict | None = None) -> dict:
         actor = _actor(actor)
         additions = parse_attachments(files)
         removal_keys = {attachment_key(safe_filename(name)) for name in removed}
@@ -315,9 +319,10 @@ class Workspace:
                         scores=[], resolution=None, rule_version=program.rule_version)
             _event(case, "materials_updated", actor, f"資料更新，新增或更換 {len(additions)} 份附件。")
 
-        return self._edit(case_id, revision, apply)
+        return self._edit(case_id, revision, apply, viewer=viewer, grants=grants)
 
-    def score(self, case_id: str, revision: int, scores: list[ReviewScore], actor: str) -> dict:
+    def score(self, case_id: str, revision: int, scores: list[ReviewScore], actor: str, *,
+              viewer: object = None, grants: dict | None = None) -> dict:
         actor = _actor(actor)
 
         def apply(case, _batch):
@@ -329,7 +334,7 @@ class Workspace:
             names = "、".join(score.reviewer for score in scores) or "未有評分"
             _event(case, "scores_saved", actor, f"更新評審員：{names}。")
 
-        return self._edit(case_id, revision, apply)
+        return self._edit(case_id, revision, apply, viewer=viewer, grants=grants)
 
     # ---------- P1-04：評審指派、利益申報與身份綁定的獨立評分 ----------
 
@@ -342,7 +347,8 @@ class Workspace:
                 return row
         raise ValueError("評審未被指派此個案。")
 
-    def assign(self, case_id: str, revision: int, actor: str, reviewer_id: str, display_name: str) -> dict:
+    def assign(self, case_id: str, revision: int, actor: str, reviewer_id: str, display_name: str, *,
+               viewer: object = None, grants: dict | None = None) -> dict:
         """經辦把 reviewer 賬號指派到個案（賬號存在性/角色/啓用狀態由 API 層對 auth 校驗）。"""
         actor = _actor(actor)
         if not isinstance(reviewer_id, str) or not reviewer_id.strip() or len(reviewer_id) > 120:
@@ -362,10 +368,11 @@ class Workspace:
                                 "status": "assigned", "note": ""})
             _event(case, "reviewer_assigned", actor, f"指派評審：{display_name.strip()}（{reviewer_id}）。")
 
-        return self._edit(case_id, revision, apply)
+        return self._edit(case_id, revision, apply, viewer=viewer, grants=grants)
 
     def declare(self, case_id: str, revision: int, reviewer_id: str, display_name: str,
-                has_conflict: bool, note: str = "") -> dict:
+                has_conflict: bool, note: str = "", *,
+                viewer: object = None, grants: dict | None = None) -> dict:
         """被指派評審申報利益衝突；申報有衝突即迴避（已有評分一併移除並記錄審計）。"""
         reviewer_id = _actor(reviewer_id)
         note = (note or "").strip()
@@ -390,10 +397,11 @@ class Workspace:
                 detail += f"其原有評分（{removed} 行）已移除。"
             _event(case, "conflict_declared", display_name, detail)
 
-        return self._edit(case_id, revision, apply)
+        return self._edit(case_id, revision, apply, viewer=viewer, grants=grants)
 
     def score_own(self, case_id: str, revision: int, reviewer_id: str, display_name: str,
-                  criteria: dict, comment: str = "") -> dict:
+                  criteria: dict, comment: str = "", *,
+                  viewer: object = None, grants: dict | None = None) -> dict:
         """評審本人提交評分：服務端強制評委名=賬號顯示名，按 reviewer_id 覆寫既有行（upsert）。"""
         reviewer_id = _actor(reviewer_id)
 
@@ -415,9 +423,10 @@ class Workspace:
             assignment["status"] = "submitted"
             _event(case, "scores_saved", display_name, "評審提交本人評分（身份綁定）。")
 
-        return self._edit(case_id, revision, apply)
+        return self._edit(case_id, revision, apply, viewer=viewer, grants=grants)
 
-    def resolve(self, case_id: str, revision: int, actor: str, reason: str) -> dict:
+    def resolve(self, case_id: str, revision: int, actor: str, reason: str, *,
+                viewer: object = None, grants: dict | None = None) -> dict:
         actor, reason = _actor(actor), _reason(reason)
 
         def apply(case, batch):
@@ -429,9 +438,10 @@ class Workspace:
             case["resolution"] = {"actor": actor, "reason": reason, "basis": basis, "at": _now()}
             _event(case, "resolution_recorded", actor, reason)
 
-        return self._edit(case_id, revision, apply)
+        return self._edit(case_id, revision, apply, viewer=viewer, grants=grants)
 
-    def sign(self, case_id: str, revision: int, actor: str, reason: str, outcome: str) -> dict:
+    def sign(self, case_id: str, revision: int, actor: str, reason: str, outcome: str, *,
+             viewer: object = None, grants: dict | None = None) -> dict:
         actor, reason = _actor(actor), _reason(reason)
 
         def apply(case, batch):
@@ -460,9 +470,10 @@ class Workspace:
             }
             _event(case, "decision_signed", actor, f"{outcome} · {program.rule_version} · {reason}")
 
-        return self._edit(case_id, revision, apply)
+        return self._edit(case_id, revision, apply, viewer=viewer, grants=grants)
 
-    def track(self, case_id: str, revision: int, actor: str, project: dict) -> dict:
+    def track(self, case_id: str, revision: int, actor: str, project: dict, *,
+              viewer: object = None, grants: dict | None = None) -> dict:
         actor = _actor(actor)
         milestones, reports, payments = _project(project)
         for item in milestones:
@@ -485,4 +496,4 @@ class Workspace:
             _event(case, "project_updated", actor,
                    f"{len(milestones)} 項里程碑、{len(payments)} 筆付款記錄及 {len(reports)} 份報告。")
 
-        return self._edit(case_id, revision, apply, post_award=True)
+        return self._edit(case_id, revision, apply, post_award=True, viewer=viewer, grants=grants)

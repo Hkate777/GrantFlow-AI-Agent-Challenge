@@ -184,7 +184,7 @@ python cli.py --llm mock --region HK --out <臨時目錄>
 - [x] ~~登入 token 兑現~~：`/api/auth/login` 簽發 Bearer（全局認證已支援），新增 `/api/auth/logout` 撤銷單一會話，前端存 `sessionStorage` 並提供登入／登出；Basic 如實回報無服務端會話可撤。見 `tests/test_auth.py`
 - [x] ~~P0-01 依賴真鎖定~~：`requirements.txt` 改用精確 `==` 版本（實測相容組合），移除不存在的 `httpx2` 幽靈依賴
 - [ ] **審計獨立保存（接真實資助數據前的硬性前置）**：`_event()` 現把 `audit` append 進 `case["audit"]`，與業務資料同一 payload，`storage.update()` 整體覆蓋。有寫權限者能連業務資料一起改掉，做不到獨立、append-only。改法：審計寫獨立只追加表（單獨 DB 或獨立檔案 + 哈希鏈），業務表不再持有它
-- [ ] P0-02/03：機構級 OIDC/SSO 登入 + 個案級授權對接（機構對接仍待）。代碼側骨架已落地：`src/kkg/access.py` 的 `can_view_case` 判定、`storage.py`/`workspace.py` 的 `viewer`/`grants` 過濾、管理員端點 `GET/PUT /api/access/grants`、`GRANTFLOW_CASE_SCOPE` 開關；測試見 `tests/test_case_scope.py`（9 項）。真實授權表須由機構的真實資料填入，骨架本身不提供帳號體系。
+- [ ] P0-02/03：機構級 OIDC/SSO 登入 + 個案級授權對接（機構對接仍待）。代碼側骨架已落地：`src/kkg/access.py` 的 `can_view_case` 判定、`storage.py`/`workspace.py` 的 `viewer`/`grants` 過濾、管理員端點 `GET/PUT /api/access/grants`、`GRANTFLOW_CASE_SCOPE` 開關（預設關閉，部署時須顯式設為 `1` 才生效；白名單模式同時約束經辦、主管與財務，須一併列入）。可見性判斷已下沉至 `workspace._edit()`，八個寫端點共用同一閘門，修復「已指派但白名單不給看」的評委讀個案得 404 卻仍能申報／評分的寫穿；`score_own`／`conflict` 的「須被指派」檢查保留，與可見性疊加為「須被指派且可見」。測試見 `tests/test_case_scope.py`（9 項）與 `tests/test_write_scope_bypass.py`（4 項，含端到端 PoC）。真實授權表須由機構的真實資料填入，骨架本身不提供帳號體系。
 - [ ] P0-05：收件時間/回執正式化（已打地基：`received_at` 服務端記錄）
 - [x] ~~P0-08：資料遷移腳本~~（骨架已落地）：`src/kkg/migrate.py` + `scripts/migrate.py`，為舊個案補 `program_snapshot`；預設試算、`--apply` 才寫入，冪等且不覆蓋既有快照，找不到同名計劃記入 `unresolved` 不臆造。測試見 `tests/test_migration.py`（4 項）。升級前先跑一次試算確認。
 - [ ] P1-05：評委最低人數在**簽發 UI**上的明確提示（後端已擋）
@@ -224,7 +224,7 @@ configs/campus_pilot.yaml     校園試點計劃（第二套規則）
 configs/regions/*.yaml        15 地區配置
 web/                  前端（app.js/index.html/styles.css）
 scripts/              check_language.py / benchmark.py / migrate.py / eval_semantic.py / pitch_demo.py / vault_cli.py
-tests/                257 項測試（含 test_roles/test_security/test_script/test_tracking/test_serve/test_traceability/test_case_scope/test_migration/test_semantic_eval…）
+tests/                263 項測試（含 test_roles/test_security/test_script/test_tracking/test_serve/test_traceability/test_case_scope/test_write_scope_bypass/test_migration/test_semantic_eval…）
 docs/                 architecture.md / deployment.md / proposal-outline.md / RELEASE_NOTES_v1.0~v1.1
 Dockerfile / docker-compose.yml  非 root 容器、/data 持久卷、健康檢查
 deploy/               fly.toml / render.yaml 雲端部署範例
